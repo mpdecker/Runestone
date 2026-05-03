@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: runestone
+      POSTGRES_USER: runestone
+      POSTGRES_PASSWORD: runestone
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations/pg:/docker-entrypoint-initdb.d
+
+  neo4j:
+    image: neo4j:5
+    environment:
+      NEO4J_AUTH: neo4j/runestone
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4jdata:/data
+      - neo4jplugins:/plugins
+      - ./migrations/neo4j:/var/lib/neo4j/import
+
+volumes:
+  pgdata:
+  neo4jdata:
+  neo4jplugins:

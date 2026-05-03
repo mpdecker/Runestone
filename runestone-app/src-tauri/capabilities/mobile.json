@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Mobile permissions for Runestone",
+  "windows": ["main"],
+  "platforms": ["iOS", "android"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "fs:default",
+    "core:window:allow-set-title",
+    "core:window:allow-close"
+  ]
+}

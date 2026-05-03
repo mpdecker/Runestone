@@ -1,0 +1,7 @@
+{
+  "name": "word-count-goal",
+  "version": "1.0.0",
+  "description": "Adds a word count goal tracker to the editor. Set a daily word count target and track progress.",
+  "author": "Runestone",
+  "main_file": "index.js"
+}

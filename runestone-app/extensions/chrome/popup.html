@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 280px; padding: 12px; font-family: system-ui, sans-serif; font-size: 13px; }
+    button { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; font-size: 13px; }
+    button:hover { background: #1d4ed8; }
+    input { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; margin-bottom: 8px; }
+    #status { margin-top: 8px; font-size: 11px; color: #666; }
+    .success { color: #16a34a; }
+    .error { color: #dc2626; }
+    label { font-size: 11px; color: #666; display: block; margin-bottom: 2px; }
+  </style>
+</head>
+<body>
+  <label>Server port:</label>
+  <input type="number" id="port" value="9876" min="1024" max="65535">
+  <button id="clipBtn">Clip this page</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
