@@ -20,4 +20,4 @@ pgvector = { version = "0.4", features = ["sqlx"] }
 lopdf = "0.34"
 text-splitter = "0.18"
 thiserror = "2"
-sha2 = "0.10"
+sha2 = "0.11"
