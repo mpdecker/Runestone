@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MobileApp } from '@/features/layout/MobileApp'
 import { useStore } from '@/store'
-import type { Mock } from 'vitest'
-
 vi.mock('@/features/layout/MobileGraphView', () => ({
   MobileGraphView: () => <div data-testid="mobile-graph">Graph</div>,
 }))

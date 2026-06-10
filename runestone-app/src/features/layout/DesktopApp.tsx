@@ -1,11 +1,16 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Sidebar } from '@/features/sidebar'
-import { NoteEditor } from '@/features/editor'
-import { SearchPanel } from '@/features/search'
 import { TabBar } from '@/features/editor/TabBar'
 import { useStore } from '@/store'
+import { setupVaultFileWatcher } from '@/store/node-slice'
 
+const NoteEditor = lazy(() =>
+  import('@/features/editor').then((m) => ({ default: m.NoteEditor })),
+)
+const SearchPanel = lazy(() =>
+  import('@/features/search').then((m) => ({ default: m.SearchPanel })),
+)
 const GraphCanvas = lazy(() =>
   import('@/features/graph').then((m) => ({ default: m.GraphCanvas })),
 )
@@ -78,6 +83,11 @@ export function DesktopApp() {
 
   useEffect(() => {
     initDb().then(() => loadVaults())
+    setupVaultFileWatcher(async () => {
+      const { loadNodes, loadGraphData } = useStore.getState()
+      await loadNodes()
+      await loadGraphData()
+    })
   }, [initDb, loadVaults])
 
   useEffect(() => {
@@ -177,11 +187,13 @@ export function DesktopApp() {
     <div className="h-screen flex bg-background text-foreground overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex min-w-0">
-        <Suspense fallback={<PanelFallback />}>
-          <GraphCanvas />
-        </Suspense>
+        {!selectedNodeId && (
+          <Suspense fallback={<PanelFallback />}>
+            <GraphCanvas />
+          </Suspense>
+        )}
         {selectedNodeId && (
-          <div className="w-96 border-l shrink-0 flex flex-col min-h-0">
+          <div className="flex-1 flex flex-col min-h-0">
             {openTabs.length > 0 && (
               <div className="flex items-center border-b bg-card shrink-0">
                 <div className="flex-1 min-w-0">
@@ -203,11 +215,15 @@ export function DesktopApp() {
             )}
             <div className={`flex-1 min-h-0 flex flex-col ${splitMode === 'vertical' ? 'divide-y' : ''}`}>
               <div className={splitMode === 'vertical' ? 'flex-1 min-h-0' : 'flex-1 min-h-0'}>
-                <NoteEditor />
+                <Suspense fallback={<PanelFallback />}>
+                  <NoteEditor />
+                </Suspense>
               </div>
               {splitMode === 'vertical' && secondaryTabId && secondaryNode && (
                 <div className="flex-1 min-h-0">
-                  <NoteEditor secondary />
+                  <Suspense fallback={<PanelFallback />}>
+                    <NoteEditor secondary />
+                  </Suspense>
                 </div>
               )}
               {splitMode === 'vertical' && !secondaryTabId && (
@@ -219,7 +235,9 @@ export function DesktopApp() {
           </div>
         )}
       </div>
-      <SearchPanel />
+      <Suspense fallback={null}>
+        <SearchPanel />
+      </Suspense>
       <Suspense fallback={null}>
         <ExtractionReview />
         <ChatPanel />

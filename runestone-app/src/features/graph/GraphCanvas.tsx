@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useMemo } from 'react'
 import cytoscape, { type Core, type EventObject } from 'cytoscape'
 import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '@/store'
@@ -48,6 +48,13 @@ export function GraphCanvas() {
       graphDepth: s.graphDepth,
       setGraphDepth: s.setGraphDepth,
     })),
+  )
+
+  const nodeCount = graphData?.nodes.length ?? 0
+  const edgeCount = graphData?.edges.length ?? 0
+  const graphSignature = useMemo(
+    () => `${nodeCount}:${edgeCount}`,
+    [nodeCount, edgeCount],
   )
 
   const updateGraph = useCallback(() => {
@@ -126,7 +133,7 @@ export function GraphCanvas() {
   }, [graphData, filterText, filterTypes])
 
   useEffect(() => {
-    if (!containerRef.current) return
+    if (!containerRef.current || cyRef.current) return
 
     const cy = cytoscape({
       container: containerRef.current,
@@ -191,16 +198,11 @@ export function GraphCanvas() {
     })
 
     cyRef.current = cy
-
-    return () => {
-      cy.destroy()
-      cyRef.current = null
-    }
-  }, [])
+  }, [selectNode, loadLocalGraph])
 
   useEffect(() => {
     updateGraph()
-  }, [updateGraph])
+  }, [updateGraph, graphSignature])
 
   useEffect(() => {
     if (cyRef.current && selectedNodeId) {

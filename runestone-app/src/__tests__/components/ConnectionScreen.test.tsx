@@ -40,21 +40,30 @@ describe('ConnectionScreen', () => {
     expect(screen.getByText('Connect')).not.toBeDisabled()
   })
 
-  it('calls invoke with URL on connect', async () => {
+  it('calls configure and test_connection before onConnected', async () => {
     const { invoke } = await import('@tauri-apps/api/core')
     const mockInvoke = invoke as ReturnType<typeof vi.fn>
-    mockInvoke.mockResolvedValue(undefined)
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'configure_server_connection') return Promise.resolve(undefined)
+      if (cmd === 'test_connection') return Promise.resolve(true)
+      return Promise.resolve(undefined)
+    })
+    const onConnected = vi.fn()
 
-    render(<ConnectionScreen onConnected={vi.fn()} />)
+    render(<ConnectionScreen onConnected={onConnected} />)
 
     fireEvent.change(screen.getByPlaceholderText('https://my-server.com'), {
       target: { value: 'http://server:3000' },
     })
     fireEvent.click(screen.getByText('Connect'))
 
-    expect(mockInvoke).toHaveBeenCalledWith('configure_server_connection', {
-      apiUrl: 'http://server:3000',
-      authToken: null,
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('configure_server_connection', {
+        apiUrl: 'http://server:3000',
+        authToken: null,
+      })
+      expect(mockInvoke).toHaveBeenCalledWith('test_connection')
+      expect(onConnected).toHaveBeenCalled()
     })
   })
 

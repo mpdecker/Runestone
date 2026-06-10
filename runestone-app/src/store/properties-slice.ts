@@ -1,5 +1,6 @@
 import type { StateCreator } from 'zustand'
 import type { NodeProperty } from '../lib/types'
+import type { AppStore } from './index'
 import * as api from '../lib/api'
 
 export interface PropertiesSlice {
@@ -9,8 +10,7 @@ export interface PropertiesSlice {
   removeProperty: (nodeId: string, key: string) => Promise<void>
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createPropertiesSlice: StateCreator<any, [], [], PropertiesSlice> = (set) => ({
+export const createPropertiesSlice: StateCreator<AppStore, [], [], PropertiesSlice> = (set) => ({
   nodeProperties: [],
 
   loadNodeProperties: async (nodeId: string) => {

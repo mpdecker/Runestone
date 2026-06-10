@@ -71,11 +71,19 @@ describe('DesktopApp', () => {
     resetStore()
   })
 
-  it('renders sidebar and graph canvas', async () => {
+  it('renders sidebar and graph canvas when no node selected', async () => {
     render(<DesktopApp />)
     expect(screen.getByTestId('sidebar')).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByTestId('graph-canvas')).toBeInTheDocument()
+    })
+  })
+
+  it('does not render graph canvas when a node is selected', async () => {
+    useStore.setState({ selectedNodeId: 'n-1' })
+    render(<DesktopApp />)
+    await waitFor(() => {
+      expect(screen.queryByTestId('graph-canvas')).not.toBeInTheDocument()
     })
   })
 

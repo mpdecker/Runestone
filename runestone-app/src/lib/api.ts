@@ -3,6 +3,8 @@ import type {
   Vault,
   Node,
   NodeListItem,
+  ScanVaultResult,
+  EmbeddingStatus,
   CreateVaultRequest,
   CreateNodeRequest,
   UpdateNodeRequest,
@@ -28,6 +30,21 @@ import type {
   NodeVersion,
 } from './types'
 import type { PluginInfo } from './plugin-types'
+
+export interface ConnectionStatus {
+  mode: string
+  api_url: string | null
+  connected: boolean
+  local_db_available: boolean
+}
+
+export async function getConnectionStatus(): Promise<ConnectionStatus> {
+  return invoke('get_connection_status')
+}
+
+export async function testConnection(): Promise<boolean> {
+  return invoke('test_connection')
+}
 
 export async function initDatabase(): Promise<string> {
   return invoke('init_database')
@@ -57,12 +74,39 @@ export async function getNode(id: string): Promise<Node> {
   return invoke('get_node', { id })
 }
 
-export async function listNodes(vaultId: string): Promise<NodeListItem[]> {
-  return invoke('list_nodes', { vaultId })
+export async function listNodes(
+  vaultId: string,
+  limit?: number,
+  offset?: number,
+): Promise<NodeListItem[]> {
+  return invoke('list_nodes', { vaultId, limit, offset })
 }
 
-export async function scanVault(vaultId: string): Promise<NodeListItem[]> {
-  return invoke('scan_vault', { vaultId })
+export async function scanVault(
+  vaultId: string,
+  deleteOrphans?: boolean,
+): Promise<ScanVaultResult> {
+  return invoke('scan_vault', { vaultId, deleteOrphans })
+}
+
+export async function startVaultWatcher(vaultId: string): Promise<void> {
+  return invoke('start_vault_watcher', { vaultId })
+}
+
+export async function stopVaultWatcher(): Promise<void> {
+  return invoke('stop_vault_watcher')
+}
+
+export async function chatWithGraphStream(request: ChatRequest): Promise<ChatResponse> {
+  return invoke('chat_with_graph_stream', { request })
+}
+
+export async function reindexVault(vaultId: string): Promise<{ enqueued: number }> {
+  return invoke('reindex_vault', { vaultId })
+}
+
+export async function getEmbeddingStatus(): Promise<EmbeddingStatus> {
+  return invoke('get_embedding_status')
 }
 
 export async function getRandomNode(vaultId: string): Promise<Node> {

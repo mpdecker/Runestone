@@ -1,5 +1,6 @@
 import type { StateCreator } from 'zustand'
 import type { TagsResponse, TagInfo } from '../lib/types'
+import type { AppStore } from './index'
 import * as api from '../lib/api'
 
 export interface TagSlice {
@@ -14,8 +15,7 @@ export interface TagSlice {
   selectTag: (tag: string | null) => void
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createTagSlice: StateCreator<any, [], [], TagSlice> = (set, get) => ({
+export const createTagSlice: StateCreator<AppStore, [], [], TagSlice> = (set, get) => ({
   nodeTags: null,
   vaultTags: [],
   selectedTag: null,

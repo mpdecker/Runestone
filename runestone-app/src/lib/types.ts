@@ -27,6 +27,20 @@ export interface NodeListItem {
   updated_at: string | null
 }
 
+export interface ScanVaultResult {
+  created: number
+  updated: number
+  skipped: number
+  deleted: number
+}
+
+export interface EmbeddingStatus {
+  pending: number
+  processing: number
+  completed: number
+  failed: number
+}
+
 export interface CreateVaultRequest {
   name: string
   root_path: string

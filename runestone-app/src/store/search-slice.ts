@@ -1,11 +1,13 @@
 import type { StateCreator } from 'zustand'
 import type { SearchResults, SearchResult } from '../lib/types'
+import type { AppStore } from './index'
 import * as api from '../lib/api'
 
 export interface SearchSlice {
   searchQuery: string
   searchResults: SearchResults | null
   searchLoading: boolean
+  searchError: string | null
   showSearch: boolean
   similarNodes: SearchResult[]
   setSearchQuery: (query: string) => void
@@ -14,11 +16,11 @@ export interface SearchSlice {
   toggleSearch: () => void
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createSearchSlice: StateCreator<any, [], [], SearchSlice> = (set, get) => ({
+export const createSearchSlice: StateCreator<AppStore, [], [], SearchSlice> = (set, get) => ({
   searchQuery: '',
   searchResults: null,
   searchLoading: false,
+  searchError: null,
   showSearch: false,
   similarNodes: [],
 
@@ -29,7 +31,7 @@ export const createSearchSlice: StateCreator<any, [], [], SearchSlice> = (set, g
   runSearch: async () => {
     const { selectedVaultId, searchQuery } = get()
     if (!selectedVaultId || !searchQuery.trim()) return
-    set({ searchLoading: true, error: null })
+    set({ searchLoading: true, searchError: null })
     try {
       const results = await api.hybridSearch({
         vault_id: selectedVaultId,
@@ -39,21 +41,21 @@ export const createSearchSlice: StateCreator<any, [], [], SearchSlice> = (set, g
       })
       set({ searchResults: results, searchLoading: false, showSearch: true })
     } catch (e) {
-      set({ error: `Search failed: ${e}`, searchLoading: false })
+      set({ searchError: `Search failed: ${e}`, searchLoading: false })
     }
   },
 
   findSimilar: async (nodeId: string) => {
-    set({ searchLoading: true, error: null })
+    set({ searchLoading: true, searchError: null })
     try {
       const results = await api.findSimilar(nodeId, 10)
       set({ similarNodes: results, searchLoading: false, showSearch: true })
     } catch (e) {
-      set({ error: `Find similar failed: ${e}`, searchLoading: false })
+      set({ searchError: `Find similar failed: ${e}`, searchLoading: false })
     }
   },
 
   toggleSearch: () => {
-    set((s: { showSearch: boolean }) => ({ showSearch: !s.showSearch }))
+    set((s) => ({ showSearch: !s.showSearch }))
   },
 })

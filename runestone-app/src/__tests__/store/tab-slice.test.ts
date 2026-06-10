@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useStore } from '@/store'
+import { makeNode } from '@/__tests__/helpers/fixtures'
 
 const mockApi = vi.hoisted(() => ({
   initDatabase: vi.fn().mockResolvedValue('ok'),
@@ -87,7 +88,7 @@ describe('tab-slice', () => {
     })
 
     it('clears node state when closing last tab', () => {
-      useStore.setState({ selectedNodeId: 'n-1', currentNode: { id: 'n-1' }, nodeTags: { node_id: 'n-1', tags: [] } })
+      useStore.setState({ selectedNodeId: 'n-1', currentNode: makeNode({ id: 'n-1' }), nodeTags: { node_id: 'n-1', tags: [] } })
       useStore.getState().addTab('n-1', 'First')
       useStore.getState().closeTab('n-1')
 
@@ -122,7 +123,7 @@ describe('tab-slice', () => {
 
   describe('closeAllTabs', () => {
     it('clears all tabs and resets node state', () => {
-      useStore.setState({ selectedNodeId: 'n-1', currentNode: { id: 'n-1' } })
+      useStore.setState({ selectedNodeId: 'n-1', currentNode: makeNode({ id: 'n-1' }) })
       useStore.getState().addTab('n-1', 'First')
       useStore.getState().addTab('n-2', 'Second')
 

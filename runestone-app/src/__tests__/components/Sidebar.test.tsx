@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Sidebar } from '@/features/sidebar'
 import { useStore } from '@/store'
+import { makeNodeListItem } from '@/__tests__/helpers/fixtures'
 
 function resetStore() {
   useStore.setState({
@@ -49,8 +50,8 @@ const sampleVaults = [
 ]
 
 const sampleNodes = [
-  { id: 'n-1', title: 'Note One', content_type: 'note', updated_at: null },
-  { id: 'n-2', title: 'Note Two', content_type: 'concept', updated_at: null },
+  makeNodeListItem({ id: 'n-1', title: 'Note One', content_type: 'note' }),
+  makeNodeListItem({ id: 'n-2', title: 'Note Two', content_type: 'concept' }),
 ]
 
 describe('Sidebar', () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MobileSearchView } from '@/features/layout/MobileSearchView'
+import { useStore } from '@/store'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -9,6 +10,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 describe('MobileSearchView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useStore.setState({ selectedVaultId: 'vault-1' })
   })
 
   it('renders search input', () => {
@@ -52,7 +54,9 @@ describe('MobileSearchView', () => {
     fireEvent.change(input, { target: { value: 'test' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(mockInvoke).toHaveBeenCalledWith('semantic_search', { query: { query: 'test', limit: 20 } })
+    expect(mockInvoke).toHaveBeenCalledWith('semantic_search', {
+      query: { vault_id: 'vault-1', query: 'test', limit: 20 },
+    })
   })
 
   it('shows error message on failed search', async () => {

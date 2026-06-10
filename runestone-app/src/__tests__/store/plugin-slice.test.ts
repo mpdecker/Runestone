@@ -94,7 +94,7 @@ describe('plugin-slice', () => {
   describe('loadPlugin', () => {
     it('does not reload already loaded plugins', async () => {
       mockManager.plugins.set('loaded', { manifest: { name: 'loaded' }, enabled: false })
-      const info = { name: 'loaded', version: '1.0.0', path: '/p', main_file: 'index.js' }
+      const info = { name: 'loaded', version: '1.0.0', path: '/p', main_file: 'index.js', description: 'Test', author: 'Runestone' }
 
       await useStore.getState().loadPlugin(info)
 

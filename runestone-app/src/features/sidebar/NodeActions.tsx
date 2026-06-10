@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { Backlink, TagSuggestion } from '@/lib/types'
 import { useStore } from '@/store'
 import { Button } from '@/components/ui/button'
@@ -13,7 +14,31 @@ export function NodeActions() {
     suggestTags, tagSuggestions,
     backlinks, selectNode,
     nodeTags, addTags, removeTag, acceptSuggestedTags,
-  } = useStore()
+  } = useStore(
+    useShallow((s) => ({
+      selectedNodeId: s.selectedNodeId,
+      currentNode: s.currentNode,
+      showBacklinks: s.showBacklinks,
+      toggleBacklinks: s.toggleBacklinks,
+      parseWikiLinks: s.parseWikiLinks,
+      showOutgoingLinks: s.showOutgoingLinks,
+      toggleOutgoingLinks: s.toggleOutgoingLinks,
+      outgoingLinks: s.outgoingLinks,
+      summarizeNode: s.summarizeNode,
+      nodeSummary: s.nodeSummary,
+      summaryLoading: s.summaryLoading,
+      suggestedLinks: s.suggestedLinks,
+      loadSuggestedLinks: s.loadSuggestedLinks,
+      suggestTags: s.suggestTags,
+      tagSuggestions: s.tagSuggestions,
+      backlinks: s.backlinks,
+      selectNode: s.selectNode,
+      nodeTags: s.nodeTags,
+      addTags: s.addTags,
+      removeTag: s.removeTag,
+      acceptSuggestedTags: s.acceptSuggestedTags,
+    })),
+  )
 
   const [tagInput, setTagInput] = useState('')
 

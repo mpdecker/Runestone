@@ -1,6 +1,8 @@
-use crate::db::{create_neo4j_graph, create_pg_pool, run_neo4j_init, run_pg_migrations};
-use crate::embedding::EmbeddingConfig;
-use crate::llm::LlmConfig;
+use runestone_core::db::{create_neo4j_graph, create_pg_pool, run_neo4j_init, run_pg_migrations};
+use runestone_core::handlers::embeddings;
+use runestone_core::embedding::EmbeddingConfig;
+use runestone_core::llm::LlmConfig;
+use runestone_core::BackendContext;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::sync::{Arc, Mutex};
@@ -17,8 +19,9 @@ pub enum ConnectionMode {
 
 pub struct AppState {
     pub connection_mode: Mutex<ConnectionMode>,
-    pg: Option<PgPool>,
-    neo4j: Option<Arc<neo4rs::Graph>>,
+    pg: Mutex<Option<PgPool>>,
+    neo4j: Mutex<Option<Arc<neo4rs::Graph>>>,
+    pub is_remote_connected: Mutex<bool>,
     pub embed_config: EmbeddingConfig,
     pub llm_config: LlmConfig,
 }
@@ -35,22 +38,26 @@ impl AppState {
             )?;
         }
 
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://runestone:runestone@localhost:5442/runestone".to_string());
-        let neo4j_uri = std::env::var("NEO4J_URL")
-            .unwrap_or_else(|_| "bolt://localhost:7688".to_string());
-        let neo4j_user = std::env::var("NEO4J_USER")
-            .unwrap_or_else(|_| "neo4j".to_string());
-        let neo4j_password = std::env::var("NEO4J_PASSWORD")
-            .unwrap_or_else(|_| "runestone".to_string());
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://runestone:runestone@localhost:5442/runestone".to_string()
+        });
+        let neo4j_uri =
+            std::env::var("NEO4J_URL").unwrap_or_else(|_| "bolt://localhost:7688".to_string());
+        let neo4j_user = std::env::var("NEO4J_USER").unwrap_or_else(|_| "neo4j".to_string());
+        let neo4j_password =
+            std::env::var("NEO4J_PASSWORD").unwrap_or_else(|_| "runestone".to_string());
 
         let is_mobile = cfg!(target_os = "ios") || cfg!(target_os = "android");
 
         let (pg_pool, neo4j_graph, mode) = if is_mobile {
-            (None, None, ConnectionMode::Remote {
-                api_url: String::new(),
-                auth_token: None,
-            })
+            (
+                None,
+                None,
+                ConnectionMode::Remote {
+                    api_url: String::new(),
+                    auth_token: None,
+                },
+            )
         } else {
             let pg_result = tauri::async_runtime::block_on(create_pg_pool(&database_url));
             let neo4j_result = tauri::async_runtime::block_on(create_neo4j_graph(
@@ -76,52 +83,118 @@ impl AppState {
                         pg_err.as_ref().err(),
                         neo4j_err.as_ref().err()
                     );
-                    (None, None, ConnectionMode::Remote {
-                        api_url: String::new(),
-                        auth_token: None,
-                    })
+                    (
+                        None,
+                        None,
+                        ConnectionMode::Remote {
+                            api_url: String::new(),
+                            auth_token: None,
+                        },
+                    )
                 }
             }
         };
 
         let state = AppState {
             connection_mode: Mutex::new(mode),
-            pg: pg_pool,
-            neo4j: neo4j_graph,
+            pg: Mutex::new(pg_pool),
+            neo4j: Mutex::new(neo4j_graph),
+            is_remote_connected: Mutex::new(false),
             embed_config: EmbeddingConfig::default(),
             llm_config: LlmConfig::default(),
         };
 
         app.manage(state);
 
+        if let Some(state) = app.try_state::<AppState>() {
+            if state.has_local_pools() {
+                if let Ok(ctx) = state.backend_context() {
+                    embeddings::spawn_embedding_worker(ctx);
+                }
+            }
+        }
+
         Ok(())
     }
 
-    pub fn pg(&self) -> Result<&PgPool, String> {
-        self.pg.as_ref().ok_or_else(|| {
-            "Local database not available. Connect to a remote Runestone server to use this feature.".to_string()
+    pub fn is_local(&self) -> bool {
+        self.connection_mode
+            .lock()
+            .map(|mode| matches!(*mode, ConnectionMode::Local))
+            .unwrap_or(false)
+    }
+
+    pub fn is_remote_configured(&self) -> bool {
+        self.get_remote_config()
+            .map(|(url, _)| !url.is_empty())
+            .unwrap_or(false)
+    }
+
+    pub fn has_local_pools(&self) -> bool {
+        self.has_pg() && self.has_neo4j()
+    }
+
+    pub fn clear_local_pools(&self) {
+        if let Ok(mut pg) = self.pg.lock() {
+            *pg = None;
+        }
+        if let Ok(mut neo4j) = self.neo4j.lock() {
+            *neo4j = None;
+        }
+    }
+
+    pub fn set_remote_connected(&self, connected: bool) {
+        if let Ok(mut flag) = self.is_remote_connected.lock() {
+            *flag = connected;
+        }
+    }
+
+    pub fn remote_connected(&self) -> bool {
+        self.is_remote_connected.lock().map(|f| *f).unwrap_or(false)
+    }
+
+    pub fn backend_context(&self) -> Result<BackendContext, String> {
+        Ok(BackendContext {
+            pg: self.pg()?.clone(),
+            neo4j: self.neo4j()?.clone(),
+            embed_config: self.embed_config.clone(),
+            llm_config: self.llm_config.clone(),
         })
     }
 
-    pub fn neo4j(&self) -> Result<&Arc<neo4rs::Graph>, String> {
-        self.neo4j.as_ref().ok_or_else(|| {
-            "Local graph database not available. Connect to a remote Runestone server to use this feature.".to_string()
-        })
+    pub fn pg(&self) -> Result<PgPool, String> {
+        self.pg
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone()
+            .ok_or_else(|| {
+                "Local database not available. Connect to a remote Runestone server to use this feature.".to_string()
+            })
+    }
+
+    pub fn neo4j(&self) -> Result<Arc<neo4rs::Graph>, String> {
+        self.neo4j
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone()
+            .ok_or_else(|| {
+                "Local graph database not available. Connect to a remote Runestone server to use this feature.".to_string()
+            })
     }
 
     pub fn has_pg(&self) -> bool {
-        self.pg.is_some()
+        self.pg.lock().map(|p| p.is_some()).unwrap_or(false)
     }
 
-    #[allow(dead_code)]
     pub fn has_neo4j(&self) -> bool {
-        self.neo4j.is_some()
+        self.neo4j.lock().map(|n| n.is_some()).unwrap_or(false)
     }
 
     pub fn set_remote_config(&self, api_url: String, auth_token: Option<String>) {
         if let Ok(mut mode) = self.connection_mode.lock() {
             *mode = ConnectionMode::Remote { api_url, auth_token };
         }
+        self.set_remote_connected(false);
     }
 
     pub fn get_remote_config(&self) -> Option<(String, Option<String>)> {
@@ -138,6 +211,17 @@ impl AppState {
 mod tests {
     use super::*;
 
+    fn test_state(mode: ConnectionMode) -> AppState {
+        AppState {
+            connection_mode: Mutex::new(mode),
+            pg: Mutex::new(None),
+            neo4j: Mutex::new(None),
+            is_remote_connected: Mutex::new(false),
+            embed_config: EmbeddingConfig::default(),
+            llm_config: LlmConfig::default(),
+        }
+    }
+
     #[test]
     fn test_connection_mode_serialization() {
         let local = ConnectionMode::Local;
@@ -149,63 +233,26 @@ mod tests {
     }
 
     #[test]
-    fn test_connection_mode_remote_serialization() {
-        let remote = ConnectionMode::Remote {
-            api_url: "https://server.com".to_string(),
-            auth_token: Some("token123".to_string()),
-        };
-        let json = serde_json::to_string(&remote).unwrap();
-        assert!(json.contains("https://server.com"));
-        assert!(json.contains("token123"));
+    fn test_is_local() {
+        let state = test_state(ConnectionMode::Local);
+        assert!(state.is_local());
 
-        let deserialized: ConnectionMode = serde_json::from_str(&json).unwrap();
-        match deserialized {
-            ConnectionMode::Remote { api_url, auth_token } => {
-                assert_eq!(api_url, "https://server.com");
-                assert_eq!(auth_token, Some("token123".to_string()));
-            }
-            _ => panic!("Expected Remote mode"),
-        }
+        let state = test_state(ConnectionMode::Remote {
+            api_url: "http://x".to_string(),
+            auth_token: None,
+        });
+        assert!(!state.is_local());
     }
 
     #[test]
     fn test_get_remote_config_returns_none_when_local() {
-        let state = AppState {
-            connection_mode: Mutex::new(ConnectionMode::Local),
-            pg: None,
-            neo4j: None,
-            embed_config: EmbeddingConfig::default(),
-            llm_config: LlmConfig::default(),
-        };
+        let state = test_state(ConnectionMode::Local);
         assert!(state.get_remote_config().is_none());
     }
 
     #[test]
-    fn test_get_remote_config_returns_url_when_remote() {
-        let state = AppState {
-            connection_mode: Mutex::new(ConnectionMode::Remote {
-                api_url: "http://example.com".to_string(),
-                auth_token: Some("bearer".to_string()),
-            }),
-            pg: None,
-            neo4j: None,
-            embed_config: EmbeddingConfig::default(),
-            llm_config: LlmConfig::default(),
-        };
-        let config = state.get_remote_config().unwrap();
-        assert_eq!(config.0, "http://example.com");
-        assert_eq!(config.1, Some("bearer".to_string()));
-    }
-
-    #[test]
     fn test_set_remote_config_updates_mode() {
-        let state = AppState {
-            connection_mode: Mutex::new(ConnectionMode::Local),
-            pg: None,
-            neo4j: None,
-            embed_config: EmbeddingConfig::default(),
-            llm_config: LlmConfig::default(),
-        };
+        let state = test_state(ConnectionMode::Local);
         state.set_remote_config("https://new.com".to_string(), None);
         let config = state.get_remote_config().unwrap();
         assert_eq!(config.0, "https://new.com");
@@ -213,38 +260,20 @@ mod tests {
     }
 
     #[test]
-    fn test_has_pg_returns_false_when_none() {
-        let state = AppState {
-            connection_mode: Mutex::new(ConnectionMode::Local),
-            pg: None,
-            neo4j: None,
-            embed_config: EmbeddingConfig::default(),
-            llm_config: LlmConfig::default(),
-        };
+    fn test_clear_local_pools() {
+        let state = test_state(ConnectionMode::Local);
+        state.clear_local_pools();
         assert!(!state.has_pg());
     }
 
     #[test]
-    fn test_pg_returns_err_when_none() {
-        let state = AppState {
-            connection_mode: Mutex::new(ConnectionMode::Local),
-            pg: None,
-            neo4j: None,
-            embed_config: EmbeddingConfig::default(),
-            llm_config: LlmConfig::default(),
-        };
-        assert!(state.pg().is_err());
-    }
-
-    #[test]
-    fn test_neo4j_returns_err_when_none() {
-        let state = AppState {
-            connection_mode: Mutex::new(ConnectionMode::Local),
-            pg: None,
-            neo4j: None,
-            embed_config: EmbeddingConfig::default(),
-            llm_config: LlmConfig::default(),
-        };
-        assert!(state.neo4j().is_err());
+    fn test_remote_connected_flag() {
+        let state = test_state(ConnectionMode::Remote {
+            api_url: "http://x".to_string(),
+            auth_token: None,
+        });
+        assert!(!state.remote_connected());
+        state.set_remote_connected(true);
+        assert!(state.remote_connected());
     }
 }

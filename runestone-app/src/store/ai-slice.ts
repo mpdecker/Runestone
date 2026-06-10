@@ -1,5 +1,7 @@
+import { listen } from '@tauri-apps/api/event'
 import type { StateCreator } from 'zustand'
 import type { ChatMessage, ChatResponse, Citation, SearchResult, TagSuggestion } from '../lib/types'
+import type { AppStore } from './index'
 import * as api from '../lib/api'
 
 export interface AISlice {
@@ -18,8 +20,7 @@ export interface AISlice {
   suggestTags: (nodeId: string) => Promise<void>
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createAISlice: StateCreator<any, [], [], AISlice> = (set, get) => ({
+export const createAISlice: StateCreator<AppStore, [], [], AISlice> = (set, get) => ({
   nodeSummary: null,
   summaryLoading: false,
   suggestedLinks: [],
@@ -54,24 +55,60 @@ export const createAISlice: StateCreator<any, [], [], AISlice> = (set, get) => (
     if (!selectedVaultId) return
 
     const userMsg: ChatMessage = { role: 'user', content: question }
-    set({ chatMessages: [...chatMessages, userMsg], chatLoading: true, error: null })
+    const assistantMsg: ChatMessage = { role: 'assistant', content: '' }
+    set({
+      chatMessages: [...chatMessages, userMsg, assistantMsg],
+      chatLoading: true,
+      error: null,
+      chatCitations: [],
+    })
 
+    let streamUnlisten: (() => void) | null = null
+    const canStream =
+      typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
     try {
-      const response: ChatResponse = await api.chatWithGraph({
+      if (canStream) {
+        streamUnlisten = await listen<string>('chat-stream-chunk', (event) => {
+        set((s: { chatMessages: ChatMessage[] }) => {
+          const msgs = [...s.chatMessages]
+          const last = msgs[msgs.length - 1]
+          if (last?.role === 'assistant') {
+            msgs[msgs.length - 1] = { ...last, content: last.content + event.payload }
+          }
+          return { chatMessages: msgs }
+        })
+      })
+      }
+
+      const response: ChatResponse = canStream
+        ? await api.chatWithGraphStream({
+        vault_id: selectedVaultId,
+        question,
+        history: chatMessages.slice(-10),
+      })
+        : await api.chatWithGraph({
         vault_id: selectedVaultId,
         question,
         history: chatMessages.slice(-10),
       })
 
-      const assistantMsg: ChatMessage = { role: 'assistant', content: response.answer }
-      set((s: { chatMessages: ChatMessage[] }) => ({
-        chatMessages: [...s.chatMessages, assistantMsg],
-        chatCitations: response.citations,
-        chatAnswer: response.answer,
-        chatLoading: false,
-      }))
+      set((s: { chatMessages: ChatMessage[] }) => {
+        const msgs = [...s.chatMessages]
+        const last = msgs[msgs.length - 1]
+        if (last?.role === 'assistant') {
+          msgs[msgs.length - 1] = { role: 'assistant', content: response.answer }
+        }
+        return {
+          chatMessages: msgs,
+          chatCitations: response.citations,
+          chatAnswer: response.answer,
+          chatLoading: false,
+        }
+      })
     } catch (e) {
       set({ error: `Chat failed: ${e}`, chatLoading: false })
+    } finally {
+      streamUnlisten?.()
     }
   },
 

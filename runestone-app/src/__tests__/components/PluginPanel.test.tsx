@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { PluginPanel } from '@/features/sidebar/PluginPanel'
 import { useStore } from '@/store'
+import { makePluginInfo } from '@/__tests__/helpers/fixtures'
 
 function resetStore() {
   useStore.setState({
@@ -52,7 +53,7 @@ describe('PluginPanel', () => {
   it('shows available plugins list', () => {
     useStore.setState({
       availablePlugins: [
-        { name: 'test-plugin', version: '1.0.0', path: '/p/test', main_file: 'index.js' },
+        makePluginInfo({ name: 'test-plugin', path: '/p/test', main_file: 'index.js' }),
       ],
     })
     render(<PluginPanel />)
@@ -63,7 +64,7 @@ describe('PluginPanel', () => {
   it('shows Load button for uninstalled plugins', () => {
     useStore.setState({
       availablePlugins: [
-        { name: 'test-plugin', version: '1.0.0', path: '/p/test', main_file: 'index.js' },
+        makePluginInfo({ name: 'test-plugin', path: '/p/test', main_file: 'index.js' }),
       ],
     })
     render(<PluginPanel />)
@@ -73,10 +74,15 @@ describe('PluginPanel', () => {
   it('shows On/Off toggle for installed plugins', () => {
     useStore.setState({
       availablePlugins: [
-        { name: 'test-plugin', version: '1.0.0', path: '/p/test', main_file: 'index.js' },
+        makePluginInfo({ name: 'test-plugin', path: '/p/test', main_file: 'index.js' }),
       ],
       installedPlugins: [
-        { manifest: { name: 'test-plugin', version: '1.0.0' }, enabled: true },
+        {
+          manifest: { name: 'test-plugin', version: '1.0.0', description: 'Test', main: 'index.js' },
+          enabled: true,
+          activate: () => {},
+          deactivate: () => {},
+        },
       ],
     })
     render(<PluginPanel />)
@@ -86,10 +92,15 @@ describe('PluginPanel', () => {
   it('shows Off for disabled installed plugins', () => {
     useStore.setState({
       availablePlugins: [
-        { name: 'test-plugin', version: '1.0.0', path: '/p/test', main_file: 'index.js' },
+        makePluginInfo({ name: 'test-plugin', path: '/p/test', main_file: 'index.js' }),
       ],
       installedPlugins: [
-        { manifest: { name: 'test-plugin', version: '1.0.0' }, enabled: false },
+        {
+          manifest: { name: 'test-plugin', version: '1.0.0', description: 'Test', main: 'index.js' },
+          enabled: false,
+          activate: () => {},
+          deactivate: () => {},
+        },
       ],
     })
     render(<PluginPanel />)

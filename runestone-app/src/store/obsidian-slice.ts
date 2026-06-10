@@ -1,5 +1,6 @@
 import type { StateCreator } from 'zustand'
 import type { ObsidianImportResult } from '../lib/types'
+import type { AppStore } from './index'
 import * as api from '../lib/api'
 
 export interface ObsidianSlice {
@@ -7,8 +8,7 @@ export interface ObsidianSlice {
   importObsidian: (path: string) => Promise<void>
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createObsidianSlice: StateCreator<any, [], [], ObsidianSlice> = (set, get) => ({
+export const createObsidianSlice: StateCreator<AppStore, [], [], ObsidianSlice> = (set, get) => ({
   importResult: null,
 
   importObsidian: async (path: string) => {

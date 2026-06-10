@@ -22,6 +22,10 @@ export function ConnectionScreen({ onConnected }: ConnectionScreenProps) {
         apiUrl: url.trim(),
         authToken: token || null,
       })
+      const ok = await invoke<boolean>('test_connection')
+      if (!ok) {
+        throw new Error('Server health check failed')
+      }
       localStorage.setItem('runestone_server_url', url.trim())
       if (token) {
         localStorage.setItem('runestone_auth_token', token)

@@ -5,6 +5,7 @@ import * as api from '../lib/api'
 export interface ClipperSlice {
   clipperPort: number | null
   clipperLoading: boolean
+  clipperError: string | null
   clipperAuthToken: string | null
   loadClipperStatus: () => Promise<void>
   startClipper: () => Promise<void>
@@ -14,6 +15,7 @@ export interface ClipperSlice {
 export const createClipperSlice: StateCreator<AppStore, [], [], ClipperSlice> = (set, get) => ({
   clipperPort: null,
   clipperLoading: false,
+  clipperError: null,
   clipperAuthToken: null,
 
   loadClipperStatus: async () => {
@@ -35,18 +37,18 @@ export const createClipperSlice: StateCreator<AppStore, [], [], ClipperSlice> = 
     try {
       const port = await api.startClipperServer(selectedVaultId)
       const token = await api.getClipperAuthToken()
-      set({ clipperPort: port, clipperAuthToken: token, clipperLoading: false })
+      set({ clipperPort: port, clipperAuthToken: token, clipperLoading: false, clipperError: null })
     } catch (e) {
-      set({ clipperLoading: false, error: `Failed to start clipper: ${e}` })
+      set({ clipperLoading: false, clipperError: `Failed to start clipper: ${e}` })
     }
   },
 
   stopClipper: async () => {
     try {
       await api.stopClipperServer()
-      set({ clipperPort: null })
+      set({ clipperPort: null, clipperError: null })
     } catch (e) {
-      set({ error: `Failed to stop clipper: ${e}` })
+      set({ clipperError: `Failed to stop clipper: ${e}` })
     }
   },
 })

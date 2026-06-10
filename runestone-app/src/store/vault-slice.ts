@@ -22,6 +22,11 @@ export const createVaultSlice: StateCreator<AppStore, [], [], VaultSlice> = (set
 
   initDb: async () => {
     try {
+      const status = await api.getConnectionStatus()
+      if (!status.connected && status.mode.startsWith('remote')) {
+        set({ error: 'Remote server not connected. Test the connection before continuing.' })
+        return
+      }
       await api.initDatabase()
     } catch (e) {
       console.error('Database init failed:', e)
@@ -32,6 +37,14 @@ export const createVaultSlice: StateCreator<AppStore, [], [], VaultSlice> = (set
   loadVaults: async () => {
     set({ isLoading: true, error: null })
     try {
+      const status = await api.getConnectionStatus()
+      if (!status.connected && status.mode.startsWith('remote')) {
+        set({
+          error: 'Remote server not connected. Test the connection before loading vaults.',
+          isLoading: false,
+        })
+        return
+      }
       const vaults = await api.listVaults()
       set({ vaults, isLoading: false })
     } catch (e) {
@@ -42,6 +55,14 @@ export const createVaultSlice: StateCreator<AppStore, [], [], VaultSlice> = (set
   createVault: async (name: string, rootPath: string) => {
     set({ isLoading: true, error: null })
     try {
+      const status = await api.getConnectionStatus()
+      if (!status.connected && status.mode.startsWith('remote')) {
+        set({
+          error: 'Remote server not connected. Test the connection before creating a vault.',
+          isLoading: false,
+        })
+        return
+      }
       await api.createVault({ name, root_path: rootPath })
       await get().loadVaults()
     } catch (e) {
@@ -54,5 +75,7 @@ export const createVaultSlice: StateCreator<AppStore, [], [], VaultSlice> = (set
     get().loadNodes()
     get().loadGraphData()
     get().loadVaultTags?.()
+    api.stopVaultWatcher().catch(() => {})
+    api.startVaultWatcher(vaultId).catch((e) => console.warn('Vault watcher:', e))
   },
 })

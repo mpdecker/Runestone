@@ -9,7 +9,6 @@ services:
       - "${POSTGRES_PORT:-5442}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./migrations/pg:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-runestone} -d ${POSTGRES_DB:-runestone}"]
       interval: 5s
@@ -44,6 +43,26 @@ services:
       - ollamadata:/root/.ollama
     profiles:
       - ai
+    restart: unless-stopped
+
+  runestone-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${RUNESTONE_SERVER_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-runestone}:${POSTGRES_PASSWORD:-runestone}@postgres:5432/${POSTGRES_DB:-runestone}
+      NEO4J_URL: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: runestone
+      RUNESTONE_API_TOKEN: ${RUNESTONE_API_TOKEN:-runestone-dev-token}
+      RUNESTONE_SERVER_PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

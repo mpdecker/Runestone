@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '@/store'
 
 interface TreeNode {
@@ -147,7 +148,15 @@ function TreeNodeRow({
 }
 
 export function FileTree() {
-  const { nodes, selectedNodeId, selectNode, filterText, filterTypes } = useStore()
+  const { nodes, selectedNodeId, selectNode, filterText, filterTypes } = useStore(
+    useShallow((s) => ({
+      nodes: s.nodes,
+      selectedNodeId: s.selectedNodeId,
+      selectNode: s.selectNode,
+      filterText: s.filterText,
+      filterTypes: s.filterTypes,
+    })),
+  )
 
   const filteredNodes = useMemo(() => {
     let result = nodes

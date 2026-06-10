@@ -2,6 +2,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useStore } from '@/store'
 
 const mockApi = vi.hoisted(() => ({
+  getConnectionStatus: vi.fn().mockResolvedValue({
+    mode: 'local',
+    api_url: null,
+    connected: true,
+    local_db_available: true,
+  }),
+  testConnection: vi.fn().mockResolvedValue(true),
   initDatabase: vi.fn().mockResolvedValue('ok'),
   listVaults: vi.fn().mockResolvedValue([]),
   listNodes: vi.fn().mockResolvedValue([]),
@@ -89,7 +96,9 @@ const mockApi = vi.hoisted(() => ({
     links_created: 3,
     files_scanned: 10,
   }),
-  scanVault: vi.fn().mockResolvedValue([]),
+  scanVault: vi.fn().mockResolvedValue({ created: 0, updated: 0, skipped: 0, deleted: 0 }),
+  startVaultWatcher: vi.fn().mockResolvedValue(undefined),
+  stopVaultWatcher: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('@/lib/api', () => ({ ...mockApi }))

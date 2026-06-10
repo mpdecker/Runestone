@@ -1,11 +1,24 @@
 import { useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '@/store'
 import { Button } from '@/components/ui/button'
 
 const NODES_PER_PAGE = 50
 
 export function NodeList() {
-  const { nodes, selectedNodeId, selectNode, deleteNode, filterText, filterTypes, splitMode, selectSecondaryNode, secondaryTabId } = useStore()
+  const { nodes, selectedNodeId, selectNode, deleteNode, filterText, filterTypes, splitMode, selectSecondaryNode, secondaryTabId } = useStore(
+    useShallow((s) => ({
+      nodes: s.nodes,
+      selectedNodeId: s.selectedNodeId,
+      selectNode: s.selectNode,
+      deleteNode: s.deleteNode,
+      filterText: s.filterText,
+      filterTypes: s.filterTypes,
+      splitMode: s.splitMode,
+      selectSecondaryNode: s.selectSecondaryNode,
+      secondaryTabId: s.secondaryTabId,
+    })),
+  )
   const [nodePage, setNodePage] = useState(0)
 
   const filteredNodes = nodes.filter((n) => {

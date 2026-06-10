@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useEditor, EditorContent } from '@tiptap/react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import { Suggestion } from '@tiptap/suggestion'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
@@ -15,6 +14,8 @@ import { useStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { WikiLink } from './WikiLinkExtension'
 import { createWikiLinkSuggestion } from './WikiLinkSuggestion'
+import { WikiLinkSuggestionExtension } from './WikiLinkSuggestionExtension'
+import { SlashCommandsExtension } from './SlashCommandsExtension'
 import { MathInline } from './MathExtension'
 import { MermaidDiagram } from './MermaidExtension'
 import { NoteEmbed } from './NoteEmbedExtension'
@@ -46,7 +47,9 @@ export function NoteEditor({ secondary = false }: Props) {
     updateNodeContent,
     saveNode,
     isEditorDirty,
+    isSecondaryEditorDirty,
     isSaving,
+    isSecondarySaving,
     nodes,
     selectNode,
     readingMode,
@@ -61,7 +64,9 @@ export function NoteEditor({ secondary = false }: Props) {
       updateNodeContent: s.updateNodeContent,
       saveNode: s.saveNode,
       isEditorDirty: s.isEditorDirty,
+      isSecondaryEditorDirty: s.isSecondaryEditorDirty,
       isSaving: s.isSaving,
+      isSecondarySaving: s.isSecondarySaving,
       nodes: s.nodes,
       selectNode: s.selectNode,
       readingMode: s.readingMode,
@@ -75,27 +80,14 @@ export function NoteEditor({ secondary = false }: Props) {
   const [preview, setPreview] = useState<PreviewState>({ visible: false, x: 0, y: 0, node: null, snippet: null })
   const previewTimerRef = useRef<number | null>(null)
 
-  const suggestionRef = useRef<ReturnType<typeof createWikiLinkSuggestion> | null>(null)
+  const editorRef = useRef<Editor | null>(null)
 
-  if (!suggestionRef.current) {
-    suggestionRef.current = createWikiLinkSuggestion(
-      () => nodes.map((n) => ({ id: n.id, title: n.title, content_type: n.content_type })),
-      (nodeId) => selectNode(nodeId),
-    )
-  }
-
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        codeBlock: false,
-      }),
-      CodeBlockLowlight.configure({
-        lowlight,
-      }),
+  const extensions = useMemo(
+    () => [
+      StarterKit.configure({ codeBlock: false }),
+      CodeBlockLowlight.configure({ lowlight }),
       TaskList,
-      TaskItem.configure({
-        nested: true,
-      }),
+      TaskItem.configure({ nested: true }),
       MathInline,
       MermaidDiagram,
       NoteEmbed,
@@ -104,31 +96,39 @@ export function NoteEditor({ secondary = false }: Props) {
       TableCell,
       TableHeader,
       Footnote,
-      Suggestion.configure({
-        ...suggestionRef.current,
-      }),
-      Suggestion.configure(
-        createSlashCommands(() => editor),
+      WikiLinkSuggestionExtension(
+        createWikiLinkSuggestion(
+          () => nodes.map((n) => ({ id: n.id, title: n.title, content_type: n.content_type })),
+          (nodeId) => selectNode(nodeId),
+        ),
       ),
+      SlashCommandsExtension(createSlashCommands(() => editorRef.current)),
       WikiLink.configure({
-        HTMLAttributes: {
-          class: 'wiki-link',
-        },
+        HTMLAttributes: { class: 'wiki-link' },
       }),
     ],
+    [nodes, selectNode],
+  )
+
+  const editor = useEditor({
+    extensions,
     content: activeNode?.content || '',
-    onUpdate: ({ editor }) => {
-      const html = editor.getHTML()
-      updateNodeContent(html)
+    onUpdate: ({ editor: ed }) => {
+      const html = ed.getHTML()
+      updateNodeContent(html, secondary)
 
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current)
       }
       saveTimerRef.current = window.setTimeout(() => {
-        saveNode()
+        saveNode(secondary)
       }, 2000)
     },
   })
+
+  useEffect(() => {
+    editorRef.current = editor
+  }, [editor])
 
   useEffect(() => {
     if (editor && activeNode) {
@@ -173,7 +173,7 @@ export function NoteEditor({ secondary = false }: Props) {
       }
     }, 300)
     return () => clearTimeout(timer)
-  }, [editor?.getHTML()])
+  }, [activeNodeId])
 
   useEffect(() => {
     if (editor) {
@@ -185,8 +185,8 @@ export function NoteEditor({ secondary = false }: Props) {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
     }
-    saveNode()
-  }, [saveNode])
+    saveNode(secondary)
+  }, [saveNode, secondary])
 
   const handleEditorClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement
@@ -244,10 +244,10 @@ export function NoteEditor({ secondary = false }: Props) {
       <div className="border-b px-3 py-2 flex items-center justify-between bg-card shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <h1 className="font-semibold text-sm truncate">{activeNode.title}</h1>
-          {isEditorDirty && (
+          {(secondary ? isSecondaryEditorDirty : isEditorDirty) && (
             <span className="text-xs text-muted-foreground shrink-0">(unsaved)</span>
           )}
-          {isSaving && (
+          {(secondary ? isSecondarySaving : isSaving) && (
             <span className="text-xs text-muted-foreground shrink-0">Saving...</span>
           )}
         </div>

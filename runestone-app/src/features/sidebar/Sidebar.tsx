@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { VaultList } from '@/features/vault/VaultList'
@@ -20,13 +21,45 @@ export function Sidebar() {
   const {
     selectedVaultId,
     scanVault, createNode, isLoading, error,
+    nodeError, nodeLoading,
+    graphError, graphLoading,
+    searchError, searchLoading,
+    clipperError,
     toggleSearch, showSearch, selectNode,
     toggleExtractions, showExtractions, pendingExtractions,
     toggleChat, showChat,
     sidebarCollapsed, toggleSidebar,
     listViewMode, setListViewMode,
     registeredPanels,
-  } = useStore()
+  } = useStore(
+    useShallow((s) => ({
+      selectedVaultId: s.selectedVaultId,
+      scanVault: s.scanVault,
+      createNode: s.createNode,
+      isLoading: s.isLoading,
+      error: s.error,
+      nodeError: s.nodeError,
+      nodeLoading: s.nodeLoading,
+      graphError: s.graphError,
+      graphLoading: s.graphLoading,
+      searchError: s.searchError,
+      searchLoading: s.searchLoading,
+      clipperError: s.clipperError,
+      toggleSearch: s.toggleSearch,
+      showSearch: s.showSearch,
+      selectNode: s.selectNode,
+      toggleExtractions: s.toggleExtractions,
+      showExtractions: s.showExtractions,
+      pendingExtractions: s.pendingExtractions,
+      toggleChat: s.toggleChat,
+      showChat: s.showChat,
+      sidebarCollapsed: s.sidebarCollapsed,
+      toggleSidebar: s.toggleSidebar,
+      listViewMode: s.listViewMode,
+      setListViewMode: s.setListViewMode,
+      registeredPanels: s.registeredPanels,
+    })),
+  )
 
   const [showObsidianImport, setShowObsidianImport] = useState(false)
   const [showNewNode, setShowNewNode] = useState(false)
@@ -40,6 +73,9 @@ export function Sidebar() {
   const handleMouseLeave = useCallback(() => {
     setHoverOpen(false)
   }, [])
+
+  const displayError = error || nodeError || graphError || searchError || clipperError
+  const displayLoading = isLoading || nodeLoading || graphLoading || searchLoading
 
   return (
     <>
@@ -101,24 +137,24 @@ export function Sidebar() {
                 </button>
               </div>
               <div className="flex gap-0.5 flex-wrap">
-                <Button variant="ghost" size="icon" className={`h-6 w-6 ${showSearch ? 'bg-accent' : ''}`} onClick={toggleSearch} title="Search (Ctrl+K)">
+                <Button variant="ghost" size="icon" className={`h-6 w-6 ${showSearch ? 'bg-accent' : ''}`} onClick={toggleSearch} title="Search (Ctrl+K)" aria-label="Search">
                   <span className="text-[10px]">Q</span>
                 </Button>
-                <Button variant="ghost" size="icon" className={`h-6 w-6 ${showChat ? 'bg-accent' : ''}`} onClick={toggleChat} title="Chat (Ctrl+L)">
+                <Button variant="ghost" size="icon" className={`h-6 w-6 ${showChat ? 'bg-accent' : ''}`} onClick={toggleChat} title="Chat (Ctrl+L)" aria-label="Chat">
                   <span className="text-[10px]">C</span>
                 </Button>
-                <Button variant="ghost" size="icon" className={`h-6 w-6 ${showExtractions ? 'bg-accent' : ''}`} onClick={toggleExtractions} title="Extractions">
+                <Button variant="ghost" size="icon" className={`h-6 w-6 ${showExtractions ? 'bg-accent' : ''}`} onClick={toggleExtractions} title="Extractions" aria-label="Extractions">
                   <span className="text-[10px] relative">
                     E{pendingExtractions.length > 0 && <span className="absolute -top-0.5 -right-1 text-[7px] text-amber-400">{pendingExtractions.length}</span>}
                   </span>
                 </Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={scanVault} title="Scan vault">
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={scanVault} title="Scan vault" aria-label="Scan vault">
                   <span className="text-[10px]">S</span>
                 </Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowObsidianImport(!showObsidianImport)} title="Import Obsidian vault">
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowObsidianImport(!showObsidianImport)} title="Import Obsidian vault" aria-label="Import Obsidian vault">
                   <span className="text-[10px]">O</span>
                 </Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowNewNode(!showNewNode)}>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowNewNode(!showNewNode)} aria-label="Create note">
                   <span className="text-sm leading-none">+</span>
                 </Button>
                 <Button
@@ -213,13 +249,13 @@ export function Sidebar() {
           </div>
         )}
 
-        {error && (
+        {displayError && (
           <div className="p-2 border-t text-xs text-destructive bg-destructive/10 shrink-0">
-            {error}
+            {displayError}
           </div>
         )}
 
-        {isLoading && (
+        {displayLoading && (
           <div className="p-2 border-t text-xs text-muted-foreground shrink-0">
             Loading...
           </div>

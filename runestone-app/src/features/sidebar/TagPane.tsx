@@ -1,8 +1,16 @@
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '@/store'
 import { Button } from '@/components/ui/button'
 
 export function TagPane() {
-  const { vaultTags, selectedTag, selectTag, selectedVaultId } = useStore()
+  const { vaultTags, selectedTag, selectTag, selectedVaultId } = useStore(
+    useShallow((s) => ({
+      vaultTags: s.vaultTags,
+      selectedTag: s.selectedTag,
+      selectTag: s.selectTag,
+      selectedVaultId: s.selectedVaultId,
+    })),
+  )
 
   if (!selectedVaultId) return null
 

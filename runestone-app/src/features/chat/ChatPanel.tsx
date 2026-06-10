@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '@/store'
 import type { ChatMessage, Citation } from '@/lib/types'
 
@@ -7,7 +8,18 @@ export function ChatPanel() {
     selectedVaultId, showChat, toggleChat,
     chatMessages, chatLoading, sendChatMessage,
     chatCitations, selectNode,
-  } = useStore()
+  } = useStore(
+    useShallow((s) => ({
+      selectedVaultId: s.selectedVaultId,
+      showChat: s.showChat,
+      toggleChat: s.toggleChat,
+      chatMessages: s.chatMessages,
+      chatLoading: s.chatLoading,
+      sendChatMessage: s.sendChatMessage,
+      chatCitations: s.chatCitations,
+      selectNode: s.selectNode,
+    })),
+  )
 
   const [input, setInput] = useState('')
 
@@ -30,8 +42,11 @@ export function ChatPanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {chatMessages.map((msg: ChatMessage, i: number) => (
           <div key={i} className={`text-sm ${msg.role === 'user' ? 'text-right' : ''}`}>
-            <div className={`inline-block px-3 py-1.5 rounded-lg max-w-[90%] ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
+            <div className={`inline-block px-3 py-1.5 rounded-lg max-w-[90%] whitespace-pre-wrap ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
               {msg.content}
+              {msg.role === 'assistant' && chatLoading && i === chatMessages.length - 1 && !msg.content && (
+                <span className="italic text-muted-foreground">Thinking...</span>
+              )}
             </div>
           </div>
         ))}
@@ -52,9 +67,6 @@ export function ChatPanel() {
           </div>
         )}
 
-        {chatLoading && (
-          <div className="text-xs text-muted-foreground italic">Thinking...</div>
-        )}
       </div>
 
       <div className="p-3 border-t flex gap-2">

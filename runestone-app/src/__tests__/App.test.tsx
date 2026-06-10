@@ -34,6 +34,8 @@ vi.mock('@/features/command-palette', () => ({
 vi.mock('@/lib/api', () => ({
   initDatabase: vi.fn().mockResolvedValue('ok'),
   listVaults: vi.fn().mockResolvedValue([]),
+  startVaultWatcher: vi.fn().mockResolvedValue(undefined),
+  stopVaultWatcher: vi.fn().mockResolvedValue(undefined),
 }))
 
 function resetStore() {

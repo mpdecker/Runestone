@@ -1,3 +1,4 @@
+import type { RawCommands } from '@tiptap/core'
 import { Node } from '@tiptap/react'
 
 declare module '@tiptap/core' {
@@ -45,12 +46,12 @@ export const NoteEmbed = Node.create({
     return {
       insertNoteEmbed:
         (title: string, snippet: string, nodeId: string) =>
-        ({ commands }) => {
+        ({ commands }: { commands: { insertContent: (content: unknown) => boolean } }) => {
           return commands.insertContent({
             type: this.name,
             attrs: { title, snippet, nodeId },
           })
         },
-    }
+    } as Partial<RawCommands>
   },
 })

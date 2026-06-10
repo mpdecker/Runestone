@@ -1,9 +1,17 @@
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '@/store'
 
 const NODE_TYPES = ['note', 'concept', 'entity', 'document']
 
 export function FilterBar() {
-  const { filterText, filterTypes, setFilterText, toggleFilterType } = useStore()
+  const { filterText, filterTypes, setFilterText, toggleFilterType } = useStore(
+    useShallow((s) => ({
+      filterText: s.filterText,
+      filterTypes: s.filterTypes,
+      setFilterText: s.setFilterText,
+      toggleFilterType: s.toggleFilterType,
+    })),
+  )
 
   return (
     <div className="p-2 border-b space-y-1.5">

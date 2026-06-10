@@ -15,3 +15,4 @@ pub mod composer;
 pub mod clipper;
 pub mod plugins;
 pub mod server;
+pub mod embeddings;

@@ -78,9 +78,10 @@ describe('ChatPanel', () => {
     await user.type(input, 'Hello')
     await user.click(screen.getByText('Send'))
 
-    expect(useStore.getState().chatMessages).toHaveLength(1)
+    expect(useStore.getState().chatMessages).toHaveLength(2)
     expect(useStore.getState().chatMessages[0].role).toBe('user')
     expect(useStore.getState().chatMessages[0].content).toBe('Hello')
+    expect(useStore.getState().chatMessages[1].role).toBe('assistant')
   })
 
   it('sends message on Enter', async () => {
@@ -91,7 +92,7 @@ describe('ChatPanel', () => {
     const input = screen.getByPlaceholderText('Ask about your knowledge graph...')
     await user.type(input, 'Question{Enter}')
 
-    expect(useStore.getState().chatMessages).toHaveLength(1)
+    expect(useStore.getState().chatMessages).toHaveLength(2)
   })
 
   it('renders chat messages', () => {
@@ -120,7 +121,11 @@ describe('ChatPanel', () => {
   })
 
   it('shows loading indicator', () => {
-    useStore.setState({ showChat: true, chatLoading: true })
+    useStore.setState({
+      showChat: true,
+      chatLoading: true,
+      chatMessages: [{ role: 'assistant', content: '' }],
+    })
     render(<ChatPanel />)
     expect(screen.getByText('Thinking...')).toBeInTheDocument()
   })

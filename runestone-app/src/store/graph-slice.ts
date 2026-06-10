@@ -1,11 +1,14 @@
 import type { StateCreator } from 'zustand'
 import type { GraphData, Backlink } from '../lib/types'
+import type { AppStore } from './index'
 import * as api from '../lib/api'
 
 export type GraphViewMode = 'global' | 'local'
 
 export interface GraphSlice {
   graphData: GraphData | null
+  graphError: string | null
+  graphLoading: boolean
   graphViewMode: GraphViewMode
   graphDepth: number
   backlinks: Backlink[]
@@ -23,9 +26,10 @@ export interface GraphSlice {
   parseWikiLinks: (nodeId: string) => Promise<void>
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createGraphSlice: StateCreator<any, [], [], GraphSlice> = (set, get) => ({
+export const createGraphSlice: StateCreator<AppStore, [], [], GraphSlice> = (set, get) => ({
   graphData: null,
+  graphError: null,
+  graphLoading: false,
   graphViewMode: 'global',
   graphDepth: 1,
   backlinks: [],
@@ -47,12 +51,12 @@ export const createGraphSlice: StateCreator<any, [], [], GraphSlice> = (set, get
 
   loadLocalGraph: async (nodeId: string, depth?: number) => {
     const d = depth ?? get().graphDepth
-    set({ graphViewMode: 'local', isLoading: true, graphDepth: d })
+    set({ graphViewMode: 'local', graphLoading: true, graphDepth: d, graphError: null })
     try {
       const data = await api.getLocalGraph(nodeId, d)
-      set({ graphData: data, isLoading: false })
+      set({ graphData: data, graphLoading: false })
     } catch (e) {
-      set({ error: `Failed to load local graph: ${e}`, isLoading: false })
+      set({ graphError: `Failed to load local graph: ${e}`, graphLoading: false })
     }
   },
 
@@ -106,7 +110,7 @@ export const createGraphSlice: StateCreator<any, [], [], GraphSlice> = (set, get
       await api.parseWikiLinks(nodeId)
       await get().loadGraphData()
     } catch (e) {
-      set({ error: `Failed to parse wiki links: ${e}` })
+      set({ graphError: `Failed to parse wiki links: ${e}` })
     }
   },
 })

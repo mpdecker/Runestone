@@ -1,3 +1,4 @@
+import type { RawCommands } from '@tiptap/core'
 import { Node } from '@tiptap/react'
 
 declare module '@tiptap/core' {
@@ -44,12 +45,12 @@ export const MermaidDiagram = Node.create({
     return {
       insertMermaidDiagram:
         (code: string) =>
-        ({ commands }) => {
+        ({ commands }: { commands: { insertContent: (content: unknown) => boolean } }) => {
           return commands.insertContent({
             type: this.name,
             attrs: { code },
           })
         },
-    }
+    } as Partial<RawCommands>
   },
 })

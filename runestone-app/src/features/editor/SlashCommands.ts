@@ -37,8 +37,6 @@ const BASE_COMMANDS: SlashCommand[] = [
   { id: 'task', label: 'Task List', description: 'Checkable task items', action: () => {} },
 ]
 
-let dropdownEl: HTMLElement | null = null
-
 function bindEditorCommands(editor: NonNullable<ReturnType<typeof import('@tiptap/react').useEditor>>) {
   BASE_COMMANDS.forEach((cmd) => {
     switch (cmd.id) {
@@ -68,9 +66,11 @@ export function createSlashCommands(
 
     render: () => {
       let container: HTMLElement
+      let currentItems: SlashCommand[] = []
 
       return {
         onStart: (props) => {
+          currentItems = props.items
           const editor = getEditor()
           if (editor) bindEditorCommands(editor)
 
@@ -86,10 +86,10 @@ export function createSlashCommands(
             }
           }
           renderDropdown(props.items, container)
-          dropdownEl = container
         },
 
         onUpdate(props) {
+          currentItems = props.items
           const editor = getEditor()
           if (editor) bindEditorCommands(editor)
 
@@ -106,15 +106,13 @@ export function createSlashCommands(
         onKeyDown(props) {
           if (props.event.key === 'Escape') {
             container?.remove()
-            dropdownEl = null
             return true
           }
-          if (props.event.key === 'Enter' && props.items.length > 0) {
+          if (props.event.key === 'Enter' && currentItems.length > 0) {
             const editor = getEditor()
             if (editor) bindEditorCommands(editor)
-            props.items[0].action()
+            currentItems[0].action()
             container?.remove()
-            dropdownEl = null
             return true
           }
           return false
@@ -122,7 +120,6 @@ export function createSlashCommands(
 
         onExit() {
           container?.remove()
-          dropdownEl = null
         },
       }
     },

@@ -1,8 +1,9 @@
+use crate::router::dispatch;
 use crate::document::{chunk_text, parse_document};
 use crate::embedding::generate_embedding;
-use crate::llm::extract_from_text;
 use crate::models::extraction::ExtractionNode;
 use crate::models::node::Node;
+use crate::path_guard::canonicalize_path;
 use crate::services::graph_sync;
 use crate::state::AppState;
 use uuid::Uuid;
@@ -13,6 +14,21 @@ pub async fn import_document(
     vault_id: Uuid,
     file_path: String,
 ) -> Result<Node, String> {
+    dispatch(
+        &state,
+        "import_document",
+        serde_json::json!({ "vault_id": vault_id, "file_path": file_path }),
+    )
+    .await
+}
+
+pub async fn import_document_impl(
+    state: &AppState,
+    vault_id: Uuid,
+    file_path: String,
+) -> Result<Node, String> {
+    let safe_path = canonicalize_path(&file_path).map_err(|e| e.to_string())?;
+    let file_path = safe_path.to_string_lossy().to_string();
     let text = parse_document(&file_path)?;
 
     let title = std::path::Path::new(&file_path)
@@ -33,13 +49,13 @@ pub async fn import_document(
     .bind(&text)
     .bind(&file_path)
     .bind(wc)
-    .fetch_one(state.pg()?)
+    .fetch_one(&state.pg()?)
     .await
     .map_err(|e| format!("Failed to insert document node: {}", e))?;
 
     graph_sync::create_node_with_pg_rollback(
-        state.neo4j()?,
-        state.pg()?,
+        &state.neo4j()?,
+        &state.pg()?,
         id,
         vault_id,
         &node.title,
@@ -51,7 +67,7 @@ pub async fn import_document(
     let chunks = chunk_text(&text, 1000, 50);
     for (i, chunk) in chunks.iter().enumerate() {
         let chunk_id = Uuid::new_v4();
-        let _ = sqlx::query(
+        sqlx::query(
             "INSERT INTO document_chunks (id, document_node_id, chunk_index, content, token_count) VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(chunk_id)
@@ -59,11 +75,12 @@ pub async fn import_document(
         .bind(i as i32)
         .bind(chunk)
         .bind(chunk.split_whitespace().count() as i32)
-        .execute(state.pg()?)
-        .await;
+        .execute(&state.pg()?)
+        .await
+        .map_err(|e| format!("Failed to insert document chunk: {}", e))?;
     }
 
-    let pg = state.pg()?.clone();
+    let pg = state.pg()?;
     let config = state.embed_config.clone();
     let embed_text = format!("{}: {}", node.title, node.content);
     let doc_id = id;
@@ -86,130 +103,10 @@ pub async fn extract_from_document(
     state: tauri::State<'_, AppState>,
     node_id: Uuid,
 ) -> Result<Vec<ExtractionNode>, String> {
-    let chunk_rows = sqlx::query_as::<_, (Uuid, i32, String)>(
-        "SELECT id, chunk_index, content FROM document_chunks WHERE document_node_id = $1 ORDER BY chunk_index",
+    dispatch(
+        &state,
+        "extract_from_document",
+        serde_json::to_value(node_id).map_err(|e| e.to_string())?,
     )
-    .bind(node_id)
-    .fetch_all(state.pg()?)
     .await
-    .map_err(|e| format!("Failed to get document chunks: {}", e))?;
-
-    if chunk_rows.is_empty() {
-        return Err("No chunks found. Import the document first.".to_string());
-    }
-
-    let mut all_extractions: Vec<ExtractionNode> = Vec::new();
-
-    for (_chunk_id, chunk_index, chunk_content) in &chunk_rows {
-        let extraction = match extract_from_text(chunk_content, &state.llm_config).await {
-            Ok(ext) => ext,
-            Err(e) => {
-                log::warn!("LLM extraction failed for chunk {}: {}", chunk_index, e);
-                continue;
-            }
-        };
-
-        let confidence = 0.8;
-
-        for entity in &extraction.entities {
-            let id = Uuid::new_v4();
-            let metadata = serde_json::json!({
-                "status": "pending",
-                "confidence": confidence,
-                "source_chunk": chunk_index,
-                "description": entity.description,
-                "extraction_type": entity.entity_type,
-            });
-
-            let _ = sqlx::query(
-                "INSERT INTO nodes (id, vault_id, title, content, content_type, metadata) SELECT $1, vault_id, $2, $3, 'entity', $4 FROM nodes WHERE id = $5",
-            )
-            .bind(id)
-            .bind(&entity.name)
-            .bind(&entity.description)
-            .bind(&metadata)
-            .bind(node_id)
-            .execute(state.pg()?)
-            .await;
-
-            if let Err(e) = graph_sync::create_extracted_entity(
-                state.neo4j()?,
-                id,
-                node_id,
-                &entity.name,
-                confidence,
-                *chunk_index,
-            )
-            .await
-            {
-                log::warn!("Neo4j entity sync failed: {}", e);
-            }
-
-            all_extractions.push(ExtractionNode {
-                name: entity.name.clone(),
-                description: entity.description.clone(),
-                extraction_type: "entity".to_string(),
-                confidence,
-                source_node_id: node_id,
-                chunk_index: *chunk_index,
-            });
-        }
-
-        for concept in &extraction.concepts {
-            let id = Uuid::new_v4();
-            let metadata = serde_json::json!({
-                "status": "pending",
-                "confidence": confidence,
-                "source_chunk": chunk_index,
-                "description": concept.description,
-                "extraction_type": "concept",
-            });
-
-            let _ = sqlx::query(
-                "INSERT INTO nodes (id, vault_id, title, content, content_type, metadata) SELECT $1, vault_id, $2, $3, 'concept', $4 FROM nodes WHERE id = $5",
-            )
-            .bind(id)
-            .bind(&concept.name)
-            .bind(&concept.description)
-            .bind(&metadata)
-            .bind(node_id)
-            .execute(state.pg()?)
-            .await;
-
-            if let Err(e) = graph_sync::create_extracted_concept(
-                state.neo4j()?,
-                id,
-                node_id,
-                &concept.name,
-                confidence,
-                *chunk_index,
-            )
-            .await
-            {
-                log::warn!("Neo4j concept sync failed: {}", e);
-            }
-
-            all_extractions.push(ExtractionNode {
-                name: concept.name.clone(),
-                description: concept.description.clone(),
-                extraction_type: "concept".to_string(),
-                confidence,
-                source_node_id: node_id,
-                chunk_index: *chunk_index,
-            });
-        }
-
-        for rel in &extraction.relationships {
-            let _ = state.neo4j()?.run(
-                neo4rs::query("MATCH (a:Node {title: $source}), (b:Node {title: $target}) CREATE (a)-[:RELATES_TO {description: $desc, type: $rel_type, confidence: $conf}]->(b)")
-                    .param("source", rel.source.clone())
-                    .param("target", rel.target.clone())
-                    .param("desc", rel.description.clone())
-                    .param("rel_type", rel.rel_type.clone())
-                    .param("conf", confidence),
-            ).await;
-        }
-    }
-
-    Ok(all_extractions)
 }

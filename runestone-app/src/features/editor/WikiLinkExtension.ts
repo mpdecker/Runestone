@@ -1,3 +1,4 @@
+import type { RawCommands } from '@tiptap/core'
 import { Node } from '@tiptap/react'
 
 export interface WikiLinkOptions {
@@ -83,31 +84,12 @@ export const WikiLink = Node.create<WikiLinkOptions>({
     return {
       insertWikiLink:
         (title: string) =>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ({ editor, commands }: any) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const nodes = editor.state.doc.descendants((node: any) => {
-            if (node.type.name === this.name) {
-              return node
-            }
-            return false
-          })
-
-          if (!nodes) return false
-
-          let nodeId: string | null = null
-          for (const entry of nodes) {
-            if (entry.node.type.name === this.name && entry.node.attrs.title === title) {
-              return true
-            }
-          }
-
-          return commands.insertContent({
+        ({ commands }: { commands: { insertContent: (content: unknown) => boolean } }) =>
+          commands.insertContent({
             type: this.name,
-            attrs: { title, nodeId: nodeId || undefined },
-          })
-        },
-    }
+            attrs: { title },
+          }),
+    } as Partial<RawCommands>
   },
 
   addKeyboardShortcuts() {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { useStore } from '@/store'
 import { Search, Loader2, FileText } from 'lucide-react'
 
 interface SearchResult {
@@ -11,18 +12,19 @@ interface SearchResult {
 }
 
 export function MobileSearchView() {
+  const { selectedVaultId } = useStore()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   const handleSearch = async () => {
-    if (!query.trim()) return
+    if (!query.trim() || !selectedVaultId) return
     setLoading(true)
     setError('')
     try {
       const res = await invoke<SearchResult[]>('semantic_search', {
-        query: { query: query.trim(), limit: 20 },
+        query: { vault_id: selectedVaultId, query: query.trim(), limit: 20 },
       })
       setResults(res || [])
     } catch (e) {
@@ -50,7 +52,7 @@ export function MobileSearchView() {
           />
           <button
             onClick={handleSearch}
-            disabled={loading || !query.trim()}
+            disabled={loading || !query.trim() || !selectedVaultId}
             className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 min-h-[32px] min-w-[32px] rounded-md bg-primary text-primary-foreground disabled:opacity-50"
           >
             {loading ? (
@@ -66,7 +68,10 @@ export function MobileSearchView() {
         {error && (
           <div className="p-4 text-sm text-destructive">{error}</div>
         )}
-        {results.length === 0 && !loading && query && !error && (
+        {!selectedVaultId && (
+          <div className="p-4 text-sm text-muted-foreground">Select a vault to search.</div>
+        )}
+        {results.length === 0 && !loading && query && !error && selectedVaultId && (
           <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2">
             <FileText className="w-8 h-8" />
             <p className="text-sm">No results found</p>

@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '@/store'
 import type { SearchResult } from '@/lib/types'
 import { ResultCard } from './ResultCard'
@@ -7,24 +9,76 @@ export function SearchPanel() {
     showSearch, toggleSearch, searchQuery, setSearchQuery,
     runSearch, searchResults, searchLoading, similarNodes,
     selectNode, findSimilar, selectedNodeId,
-  } = useStore()
+  } = useStore(
+    useShallow((s) => ({
+      showSearch: s.showSearch,
+      toggleSearch: s.toggleSearch,
+      searchQuery: s.searchQuery,
+      setSearchQuery: s.setSearchQuery,
+      runSearch: s.runSearch,
+      searchResults: s.searchResults,
+      searchLoading: s.searchLoading,
+      similarNodes: s.similarNodes,
+      selectNode: s.selectNode,
+      findSimilar: s.findSimilar,
+      selectedNodeId: s.selectedNodeId,
+    })),
+  )
+
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showSearch) return
+    inputRef.current?.focus()
+    const dialog = dialogRef.current
+    if (!dialog) return
+
+    const focusable = dialog.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    )
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || focusable.length === 0) return
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last?.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first?.focus()
+      }
+    }
+
+    dialog.addEventListener('keydown', onKeyDown)
+    return () => dialog.removeEventListener('keydown', onKeyDown)
+  }, [showSearch])
 
   if (!showSearch) return null
 
   return (
-    <div className="w-80 border-l bg-card flex flex-col shrink-0 h-full">
+    <div
+      ref={dialogRef}
+      className="w-80 border-l bg-card flex flex-col shrink-0 h-full"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Search"
+    >
       <div className="p-3 border-b">
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold text-sm">Search</h2>
           <button
             className="text-xs text-muted-foreground hover:text-foreground"
             onClick={toggleSearch}
+            aria-label="Close search"
           >
             ×
           </button>
         </div>
         <div className="flex gap-1">
           <input
+            ref={inputRef}
             className="flex-1 px-2 py-1 text-sm border rounded bg-background"
             placeholder="Search notes semantically..."
             value={searchQuery}

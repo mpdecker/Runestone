@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "test:coverage": "vitest run --coverage",
     "test:all": "pnpm test && cargo test --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -17,12 +19,15 @@
     "tauri:android": "tauri android dev",
     "tauri:android:build": "tauri android build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "node tests/e2e/smoke.mjs && node tests/e2e/server-integration.mjs",
+    "generate:bindings": "node scripts/check-bindings.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
     "@fontsource-variable/geist": "^5.2.8",
     "@tauri-apps/api": "^2.11.0",
+    "@tiptap/core": "^3.22.5",
     "@tiptap/extension-code-block-lowlight": "^3.22.5",
     "@tiptap/extension-table": "^3.22.5",
     "@tiptap/extension-table-cell": "^3.22.5",

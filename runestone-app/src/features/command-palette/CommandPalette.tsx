@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '@/store'
 
 interface Command {
@@ -32,8 +33,20 @@ function fuzzyMatch(pattern: string, text: string): number | null {
 }
 
 export function CommandPalette() {
-  const { showCommandPalette, toggleCommandPalette, createNode, toggleSearch, toggleExtractions, nodes, selectNode, registeredCommands } = useStore()
+  const { showCommandPalette, toggleCommandPalette, createNode, toggleSearch, toggleExtractions, nodes, selectNode, registeredCommands } = useStore(
+    useShallow((s) => ({
+      showCommandPalette: s.showCommandPalette,
+      toggleCommandPalette: s.toggleCommandPalette,
+      createNode: s.createNode,
+      toggleSearch: s.toggleSearch,
+      toggleExtractions: s.toggleExtractions,
+      nodes: s.nodes,
+      selectNode: s.selectNode,
+      registeredCommands: s.registeredCommands,
+    })),
+  )
   const inputRef = useRef<HTMLInputElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
 
@@ -95,6 +108,32 @@ export function CommandPalette() {
     setSelectedIndex(0)
   }, [query])
 
+  useEffect(() => {
+    if (!showCommandPalette) return
+    const dialog = dialogRef.current
+    if (!dialog) return
+
+    const focusable = dialog.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    )
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || focusable.length === 0) return
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last?.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first?.focus()
+      }
+    }
+
+    dialog.addEventListener('keydown', onKeyDown)
+    return () => dialog.removeEventListener('keydown', onKeyDown)
+  }, [showCommandPalette, query, filteredCommands.length, filteredNodes.length])
+
   if (!showCommandPalette) return null
 
   const getItemAtIndex = (idx: number) => {
@@ -130,8 +169,19 @@ export function CommandPalette() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/50" onClick={toggleCommandPalette}>
-      <div className="w-96 bg-card border rounded-lg shadow-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/50"
+      onClick={toggleCommandPalette}
+      role="presentation"
+    >
+      <div
+        ref={dialogRef}
+        className="w-96 bg-card border rounded-lg shadow-lg overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+      >
         <input
           ref={inputRef}
           className="w-full px-4 py-3 text-sm bg-transparent border-b outline-none"

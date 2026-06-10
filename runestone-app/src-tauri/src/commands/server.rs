@@ -16,11 +16,12 @@ pub fn configure_server_connection(
     auth_token: Option<String>,
 ) -> Result<ConnectionStatus, String> {
     state.set_remote_config(api_url.clone(), auth_token);
+    state.clear_local_pools();
     Ok(ConnectionStatus {
         mode: "remote".to_string(),
         api_url: Some(api_url),
         connected: false,
-        local_db_available: state.has_pg(),
+        local_db_available: false,
     })
 }
 
@@ -44,7 +45,14 @@ pub fn get_connection_status(
         ConnectionMode::Local => (None, true),
         ConnectionMode::Remote { api_url, .. } => {
             let has_url = !api_url.is_empty();
-            (if has_url { Some(api_url.clone()) } else { None }, false)
+            (
+                if has_url {
+                    Some(api_url.clone())
+                } else {
+                    None
+                },
+                has_url && state.remote_connected(),
+            )
         }
     };
 
@@ -57,10 +65,10 @@ pub fn get_connection_status(
 }
 
 #[tauri::command]
-pub async fn test_connection(
-    state: tauri::State<'_, AppState>,
-) -> Result<bool, String> {
-    let config = state.get_remote_config().ok_or("No remote server configured")?;
+pub async fn test_connection(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let config = state
+        .get_remote_config()
+        .ok_or("No remote server configured")?;
     let (api_url, auth_token) = config;
 
     if api_url.is_empty() {
@@ -79,11 +87,16 @@ pub async fn test_connection(
     match req.send().await {
         Ok(resp) => {
             if resp.status().is_success() {
+                state.set_remote_connected(true);
                 Ok(true)
             } else {
+                state.set_remote_connected(false);
                 Err(format!("Server returned status {}", resp.status()))
             }
         }
-        Err(e) => Err(format!("Connection failed: {}", e)),
+        Err(e) => {
+            state.set_remote_connected(false);
+            Err(format!("Connection failed: {}", e))
+        }
     }
 }

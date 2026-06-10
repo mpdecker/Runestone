@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, 'cursor/**']
+  pull_request:
+    branches: [main, master]
+
+defaults:
+  run:
+    working-directory: runestone-app
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: runestone-app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm exec prettier --check "src/**/*.{ts,tsx}"
+      - run: pnpm build
+      - run: pnpm test:coverage
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: runestone-app
+      - run: cargo fmt --check
+        working-directory: runestone-app
+      - run: cargo test
+        working-directory: runestone-app
+      - run: cargo test -p runestone-server
+        working-directory: runestone-app
+      - run: cargo clippy -- -D warnings
+        working-directory: runestone-app
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: runestone-app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:e2e

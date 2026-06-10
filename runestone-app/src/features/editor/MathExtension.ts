@@ -1,3 +1,4 @@
+import type { RawCommands } from '@tiptap/core'
 import { Node } from '@tiptap/react'
 import katex from 'katex'
 
@@ -46,12 +47,12 @@ export const MathInline = Node.create({
     return {
       insertMathInline:
         (formula: string) =>
-        ({ commands }) => {
+        ({ commands }: { commands: { insertContent: (content: unknown) => boolean } }) => {
           return commands.insertContent({
             type: this.name,
             attrs: { formula },
           })
         },
-    }
+    } as Partial<RawCommands>
   },
 })

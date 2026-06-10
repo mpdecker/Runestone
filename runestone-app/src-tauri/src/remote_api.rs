@@ -1,52 +1,44 @@
 use crate::state::AppState;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-/// HTTP bridge for future remote mode. Not yet wired into commands — see docs/remote-mode.md.
-#[allow(dead_code)]
-pub async fn remote_request(
-    state: &tauri::State<'_, AppState>,
-    method: &str,
-    path: &str,
-    body: Option<Value>,
-) -> Result<Value, String> {
-    let config = state.get_remote_config().ok_or("No remote server configured")?;
+pub async fn remote_invoke<T: DeserializeOwned>(
+    state: &AppState,
+    command: &str,
+    args: Value,
+) -> Result<T, String> {
+    let config = state
+        .get_remote_config()
+        .ok_or("No remote server configured")?;
     let (api_url, auth_token) = config;
 
     if api_url.is_empty() {
-        return Err("No server URL configured. Go to Settings to connect to a Runestone server.".to_string());
+        return Err(
+            "No server URL configured. Go to Settings to connect to a Runestone server.".to_string(),
+        );
     }
 
-    let url = format!("{}{}", api_url.trim_end_matches('/'), path);
+    let url = format!(
+        "{}/api/invoke/{}",
+        api_url.trim_end_matches('/'),
+        command
+    );
     let client = reqwest::Client::new();
 
-    let mut req = match method.to_uppercase().as_str() {
-        "GET" => client.get(&url),
-        "POST" => {
-            let mut r = client.post(&url);
-            if let Some(b) = body {
-                r = r.json(&b);
-            }
-            r
-        }
-        "PUT" => {
-            let mut r = client.put(&url);
-            if let Some(b) = body {
-                r = r.json(&b);
-            }
-            r
-        }
-        "DELETE" => client.delete(&url),
-        _ => return Err(format!("Unsupported HTTP method: {}", method)),
-    };
-
-    req = req.timeout(std::time::Duration::from_secs(30));
-    req = req.header("Content-Type", "application/json");
+    let mut req = client
+        .post(&url)
+        .json(&args)
+        .timeout(std::time::Duration::from_secs(60))
+        .header("Content-Type", "application/json");
 
     if let Some(token) = auth_token {
         req = req.header("Authorization", format!("Bearer {}", token));
     }
 
-    let resp = req.send().await.map_err(|e| format!("Request failed: {}", e))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
 
     if !resp.status().is_success() {
         return Err(format!(
@@ -56,6 +48,10 @@ pub async fn remote_request(
         ));
     }
 
-    let json: Value = resp.json().await.map_err(|e| format!("Response parse error: {}", e))?;
-    Ok(json)
+    let json: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Response parse error: {}", e))?;
+
+    serde_json::from_value(json).map_err(|e| format!("Deserialize error: {}", e))
 }

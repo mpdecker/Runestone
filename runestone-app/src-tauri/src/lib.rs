@@ -1,16 +1,13 @@
 mod commands;
-mod db;
-mod document;
-mod embedding;
-mod error;
-mod llm;
-mod models;
-mod path_guard;
+mod desktop_dispatch;
+mod router;
 mod remote_api;
-mod repositories;
-mod services;
 mod state;
-mod util;
+mod vault_watcher;
+
+pub use runestone_core::{
+    db, document, embedding, error, llm, models, path_guard, repositories, services, util,
+};
 
 use state::AppState;
 
@@ -73,7 +70,12 @@ pub fn run() {
             commands::extraction::batch_approve_extractions,
             commands::ai::summarize_node,
             commands::ai::chat_with_graph,
+            commands::ai::chat_with_graph_stream,
             commands::ai::suggest_tags,
+            commands::vault::start_vault_watcher,
+            commands::vault::stop_vault_watcher,
+            commands::embeddings::reindex_vault,
+            commands::embeddings::get_embedding_status,
             commands::obsidian::import_obsidian_vault,
             commands::tag::get_node_tags,
             commands::tag::add_tags_to_node,

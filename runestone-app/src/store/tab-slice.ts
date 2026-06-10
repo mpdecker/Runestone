@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand'
+import type { AppStore } from './index'
 
 export interface Tab {
   id: string
@@ -16,8 +17,7 @@ export interface TabSlice {
   setSecondaryTab: (id: string | null) => void
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createTabSlice: StateCreator<any, [], [], TabSlice> = (set, get) => ({
+export const createTabSlice: StateCreator<AppStore, [], [], TabSlice> = (set, get) => ({
   openTabs: [],
   activeTabId: null,
   secondaryTabId: null,
@@ -65,9 +65,11 @@ export const createTabSlice: StateCreator<any, [], [], TabSlice> = (set, get) =>
   },
 
   setSecondaryTab: (id: string | null) => {
-    set({ secondaryTabId: id })
+    set({ secondaryTabId: id, isSecondaryEditorDirty: false })
     if (id) {
-      get().selectNode?.(id)
+      get().selectSecondaryNode?.(id)
+    } else {
+      set({ secondaryNode: null })
     }
   },
 })

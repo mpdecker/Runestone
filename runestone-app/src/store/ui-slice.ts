@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand'
+import type { AppStore } from './index'
 
 export interface UISlice {
   darkMode: boolean
@@ -22,8 +23,7 @@ export interface UISlice {
   setUserCss: (css: string) => void
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createUISlice: StateCreator<any, [], [], UISlice> = (set, get) => ({
+export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get) => ({
   darkMode: loadPersisted('darkMode', false),
   showCommandPalette: false,
   sidebarCollapsed: loadPersisted('sidebarCollapsed', false),

@@ -32,7 +32,7 @@ A set of 15 interconnected sample notes is included for manual testing. Import t
 1. Launch the app (`pnpm tauri dev`)
 2. Create a vault pointing to any directory (e.g., `C:\Users\you\RunestoneVault`)
 3. Click the **"O"** button in the sidebar toolbar to open the Obsidian import panel
-4. Enter the path: `C:\Users\andth\Desktop\Development\Runestone\runestone-app\seed-data`
+4. Enter the path: `./seed-data` (relative to this repo, e.g. `runestone-app/seed-data`)
 5. Click **Import**
 
 All notes will be imported with `[[wiki links]]`, tags, and properties preserved. See the [Manual Testing Checklist](#manual-testing-checklist) section below for what to test.

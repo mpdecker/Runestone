@@ -1,5 +1,6 @@
 import type { StateCreator } from 'zustand'
 import type { PendingExtraction, ExtractionNode } from '../lib/types'
+import type { AppStore } from './index'
 import * as api from '../lib/api'
 
 export interface ExtractionSlice {
@@ -15,8 +16,7 @@ export interface ExtractionSlice {
   toggleExtractions: () => void
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createExtractionSlice: StateCreator<any, [], [], ExtractionSlice> = (set, get) => ({
+export const createExtractionSlice: StateCreator<AppStore, [], [], ExtractionSlice> = (set, get) => ({
   pendingExtractions: [],
   showExtractions: false,
   extractionResults: [],

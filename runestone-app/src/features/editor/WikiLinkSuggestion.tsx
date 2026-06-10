@@ -23,14 +23,26 @@ function fuzzyMatch(pattern: string, text: string): number | null {
   return pi === p.length ? score : null
 }
 
-function WikiLinkList({ items, command }: { items: NodeItem[]; command: (item: NodeItem) => void }) {
+function WikiLinkList({
+  items,
+  selectedIndex,
+  command,
+}: {
+  items: NodeItem[]
+  selectedIndex: number
+  command: (item: NodeItem) => void
+}) {
   return (
-    <div className="bg-card border rounded-lg shadow-lg p-1 max-h-48 overflow-y-auto min-w-[200px]">
+    <div className="bg-card border rounded-lg shadow-lg p-1 max-h-48 overflow-y-auto min-w-[200px]" role="listbox" aria-label="Wiki link suggestions">
       {items.length > 0 ? (
-        items.map((item) => (
+        items.map((item, index) => (
           <button
             key={item.id}
-            className="w-full text-left px-3 py-1.5 text-sm rounded hover:bg-accent flex items-center justify-between"
+            role="option"
+            aria-selected={index === selectedIndex}
+            className={`w-full text-left px-3 py-1.5 text-sm rounded flex items-center justify-between ${
+              index === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'
+            }`}
             onMouseDown={(e) => {
               e.preventDefault()
               command(item)
@@ -53,6 +65,18 @@ export function createWikiLinkSuggestion(
 ): Omit<SuggestionOptions<NodeItem>, 'editor'> {
   let component: ReactRenderer | null = null
   let el: HTMLElement | null = null
+  let selectedIndex = 0
+  let currentItems: NodeItem[] = []
+  let latestProps: SuggestionProps<NodeItem> | null = null
+
+  const renderList = () => {
+    if (!component || !latestProps) return
+    component.updateProps({
+      items: currentItems,
+      selectedIndex,
+      command: latestProps.command,
+    })
+  }
 
   return {
     char: '[[',
@@ -70,8 +94,11 @@ export function createWikiLinkSuggestion(
     render: () => {
       return {
         onStart: (props: SuggestionProps<NodeItem>) => {
+          latestProps = props
+          selectedIndex = 0
+          currentItems = props.items
           component = new ReactRenderer(WikiLinkList, {
-            props,
+            props: { items: currentItems, selectedIndex, command: props.command },
             editor: props.editor,
           })
 
@@ -96,7 +123,10 @@ export function createWikiLinkSuggestion(
         },
 
         onUpdate(props: SuggestionProps<NodeItem>) {
-          component?.updateProps(props as unknown as Record<string, unknown>)
+          latestProps = props
+          selectedIndex = 0
+          currentItems = props.items
+          renderList()
           if (el && props.clientRect) {
             const rect = props.clientRect()
             if (rect) {
@@ -114,6 +144,29 @@ export function createWikiLinkSuggestion(
             el = null
             return true
           }
+          if (props.event.key === 'ArrowDown') {
+            props.event.preventDefault()
+            if (currentItems.length === 0) return true
+            selectedIndex = Math.min(selectedIndex + 1, currentItems.length - 1)
+            renderList()
+            return true
+          }
+          if (props.event.key === 'ArrowUp') {
+            props.event.preventDefault()
+            if (currentItems.length === 0) return true
+            selectedIndex = Math.max(selectedIndex - 1, 0)
+            renderList()
+            return true
+          }
+          if (props.event.key === 'Enter') {
+            props.event.preventDefault()
+            const item = currentItems[selectedIndex]
+            if (item && latestProps) {
+              latestProps.command(item)
+              return true
+            }
+            return true
+          }
           return false
         },
 
@@ -122,6 +175,7 @@ export function createWikiLinkSuggestion(
           el = null
           component?.destroy()
           component = null
+          latestProps = null
         },
       }
     },

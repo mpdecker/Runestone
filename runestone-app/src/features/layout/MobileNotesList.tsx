@@ -4,13 +4,13 @@ import { NoteEditor } from '@/features/editor'
 import { FileText, Plus, Search, X } from 'lucide-react'
 
 export function MobileNotesList() {
-  const { nodes, loadVaults, selectNode, selectedNodeId } = useStore()
+  const { nodes, loadVaults, selectNode, selectedNodeId, createNode } = useStore()
   const [search, setSearch] = useState('')
   const [showEditor, setShowEditor] = useState(false)
 
   useEffect(() => {
     loadVaults()
-  }, [])
+  }, [loadVaults])
 
   const filtered = nodes.filter((n) =>
     n.title.toLowerCase().includes(search.toLowerCase())
@@ -36,7 +36,7 @@ export function MobileNotesList() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col relative">
       <div className="p-3 border-b shrink-0">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -79,10 +79,13 @@ export function MobileNotesList() {
       </div>
 
       <button
-        onClick={() => {
-          // createNote would be ideal, but for simplicity we just show the list for now
+        onClick={async () => {
+          const title = `Note ${new Date().toLocaleDateString()}`
+          await createNode(title)
+          setShowEditor(true)
         }}
         className="absolute bottom-20 right-4 w-14 h-14 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center"
+        aria-label="Create note"
       >
         <Plus className="w-6 h-6" />
       </button>
