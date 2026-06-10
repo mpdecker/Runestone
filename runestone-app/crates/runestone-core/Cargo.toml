@@ -18,6 +18,6 @@ dotenvy = "0.15"
 reqwest = { version = "0.12", features = ["json"] }
 pgvector = { version = "0.4", features = ["sqlx"] }
 lopdf = "0.34"
-text-splitter = "0.18"
+text-splitter = "0.31"
 thiserror = "2"
 sha2 = "0.10"
