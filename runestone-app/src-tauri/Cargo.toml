@@ -30,7 +30,7 @@ sqlx = { version = "0.9", features = ["runtime-tokio", "tls-native-tls", "postgr
 neo4rs = "0.8"
 log = "0.4"
 notify = { version = "8", features = ["macos_fsevent"] }
-notify-debouncer-mini = "0.6"
+notify-debouncer-mini = "0.7"
 walkdir = "2"
 regex = "1"
 dotenvy = "0.15"
