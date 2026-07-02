@@ -36,6 +36,6 @@ regex = "1"
 dotenvy = "0.15"
 reqwest = { version = "0.13", features = ["json"] }
 pgvector = { version = "0.4", features = ["sqlx"] }
-lopdf = "0.41"
+lopdf = "0.43"
 text-splitter = "0.32"
 thiserror = "2"
