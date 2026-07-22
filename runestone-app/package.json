@@ -74,7 +74,7 @@
     "tailwindcss": "^4.3.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.62.1",
-    "vite": "^8.1.4",
+    "vite": "^8.1.5",
     "vitest": "^4.1.5",
     "@vitest/coverage-v8": "^4.1.10",
     "prettier": "^3.9.4"
