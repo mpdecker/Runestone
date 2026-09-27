@@ -12,7 +12,7 @@ pub async fn semantic_search(
 ) -> AppResult<Vec<SearchResult>> {
     Ok(sqlx::query_as::<_, SearchResult>(
         r#"SELECT id as node_id, title, content_type,
-           substring(content, 1, 200) as snippet,
+           runestone_snippet(content, 200) as snippet,
            1 - (embedding <=> $1) as score
            FROM nodes
            WHERE vault_id = $2 AND embedding IS NOT NULL
@@ -33,7 +33,7 @@ pub async fn find_similar(
 ) -> AppResult<Vec<SearchResult>> {
     Ok(sqlx::query_as::<_, SearchResult>(
         r#"SELECT n2.id as node_id, n2.title, n2.content_type,
-           substring(n2.content, 1, 200) as snippet,
+           runestone_snippet(n2.content, 200) as snippet,
            1 - (n1.embedding <=> n2.embedding) as score
            FROM nodes n1, nodes n2
            WHERE n1.id = $1

@@ -31,13 +31,148 @@ pub fn rrf_fusion(ranked_lists: &[Vec<SearchResult>], limit: usize) -> Vec<Searc
         .collect()
 }
 
+#[derive(Debug, PartialEq)]
+enum BoolToken {
+    Word(String),
+    And,
+    Or,
+    Not,
+    Open,
+    Close,
+}
+
+fn tokenize_boolean(raw: &str) -> Vec<BoolToken> {
+    let mut tokens = Vec::new();
+    let chars: Vec<char> = raw.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_alphanumeric() || c == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let mut word: String = chars[start..i].iter().collect();
+            if i < chars.len() && chars[i] == '*' {
+                word.push('*');
+                i += 1;
+            }
+            match word.to_uppercase().as_str() {
+                "AND" => tokens.push(BoolToken::And),
+                "OR" => tokens.push(BoolToken::Or),
+                "NOT" => tokens.push(BoolToken::Not),
+                _ => tokens.push(BoolToken::Word(word)),
+            }
+            continue;
+        }
+        match c {
+            '(' => tokens.push(BoolToken::Open),
+            ')' => tokens.push(BoolToken::Close),
+            // `-term` is the common shorthand for NOT
+            '-' if i + 1 < chars.len()
+                && chars[i + 1].is_alphanumeric()
+                && (i == 0 || chars[i - 1].is_whitespace() || chars[i - 1] == '(') =>
+            {
+                tokens.push(BoolToken::Not)
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    tokens
+}
+
+/// Convert a user-typed boolean query (`foo AND bar`, `foo OR bar NOT baz`, `(a b) c*`) into a
+/// syntactically valid `to_tsquery` string. Adjacent terms are ANDed. Anything that is not a word
+/// or an operator is dropped, so arbitrary input can never produce a tsquery syntax error.
+/// Returns an empty string when there is nothing to search for.
 pub fn parse_boolean_query(raw: &str) -> String {
-    raw.replace(" AND ", " & ")
-        .replace(" and ", " & ")
-        .replace(" OR ", " | ")
-        .replace(" or ", " | ")
-        .replace(" NOT ", " !")
-        .replace(" not ", " !")
+    let mut out: Vec<String> = Vec::new();
+    let mut depth = 0usize;
+    let mut pending_op: Option<&'static str> = None;
+    let mut negate = false;
+    // true when the last emitted piece is a complete operand (word or ')')
+    let mut after_operand = false;
+
+    for tok in tokenize_boolean(raw) {
+        match tok {
+            BoolToken::Word(w) => {
+                if after_operand {
+                    out.push(pending_op.take().unwrap_or("&").to_string());
+                }
+                pending_op = None;
+                let term = match w.strip_suffix('*') {
+                    Some(stem) => format!("{}:*", stem),
+                    None => w,
+                };
+                out.push(if negate { format!("!{}", term) } else { term });
+                negate = false;
+                after_operand = true;
+            }
+            BoolToken::And => {
+                if after_operand {
+                    pending_op = Some("&");
+                }
+            }
+            BoolToken::Or => {
+                if after_operand {
+                    pending_op = Some("|");
+                }
+            }
+            BoolToken::Not => {
+                if after_operand && pending_op.is_none() {
+                    pending_op = Some("&");
+                }
+                negate = true;
+            }
+            BoolToken::Open => {
+                if after_operand {
+                    out.push(pending_op.take().unwrap_or("&").to_string());
+                }
+                pending_op = None;
+                out.push(if negate {
+                    "!(".to_string()
+                } else {
+                    "(".to_string()
+                });
+                negate = false;
+                depth += 1;
+                after_operand = false;
+            }
+            BoolToken::Close => {
+                if depth > 0 && after_operand {
+                    out.push(")".to_string());
+                    depth -= 1;
+                    pending_op = None;
+                } else if depth > 0
+                    && matches!(out.last().map(|s| s.as_str()), Some("(") | Some("!("))
+                {
+                    // empty group "( )": remove it together with the operator that led into it
+                    out.pop();
+                    if matches!(out.last().map(|s| s.as_str()), Some("&") | Some("|")) {
+                        out.pop();
+                    }
+                    depth -= 1;
+                    after_operand = matches!(out.last().map(|s| s.as_str()), Some(t) if t != "(" && t != "!(" && t != "&" && t != "|");
+                }
+            }
+        }
+    }
+
+    // Drop empty groups like "( )" and close anything left open.
+    while depth > 0 {
+        if matches!(out.last().map(|s| s.as_str()), Some("(") | Some("!(")) {
+            out.pop();
+            // also drop a now-dangling operator before the removed group
+            if matches!(out.last().map(|s| s.as_str()), Some("&") | Some("|")) {
+                out.pop();
+            }
+        } else {
+            out.push(")".to_string());
+        }
+        depth -= 1;
+    }
+    out.join(" ")
 }
 
 pub async fn semantic_search(
@@ -46,11 +181,11 @@ pub async fn semantic_search(
 ) -> Result<Vec<SearchResult>, String> {
     let embedding = generate_embedding(&query.query, &ctx.embed_config).await?;
     let vector = pgvector::Vector::from(embedding);
-    let limit = query.limit.unwrap_or(20);
+    let limit = query.limit.unwrap_or(20).clamp(0, 200);
 
     let results = sqlx::query_as::<_, SearchResult>(
         r#"SELECT id as node_id, title, content_type,
-           substring(content, 1, 200) as snippet,
+           runestone_snippet(content, 200) as snippet,
            1 - (embedding <=> $1) as score
            FROM nodes
            WHERE vault_id = $2 AND embedding IS NOT NULL
@@ -72,11 +207,11 @@ pub async fn find_similar(
     node_id: Uuid,
     limit: Option<i64>,
 ) -> Result<Vec<SearchResult>, String> {
-    let limit = limit.unwrap_or(10);
+    let limit = limit.unwrap_or(10).clamp(0, 200);
 
     let results = sqlx::query_as::<_, SearchResult>(
         r#"SELECT n2.id as node_id, n2.title, n2.content_type,
-           substring(n2.content, 1, 200) as snippet,
+           runestone_snippet(n2.content, 200) as snippet,
            1 - (n1.embedding <=> n2.embedding) as score
            FROM nodes n1, nodes n2
            WHERE n1.id = $1
@@ -99,7 +234,7 @@ pub async fn hybrid_search(
     ctx: &BackendContext,
     query: SearchQuery,
 ) -> Result<SearchResults, String> {
-    let limit = query.limit.unwrap_or(20);
+    let limit = query.limit.unwrap_or(20).clamp(0, 200);
     let vault_id = query.vault_id;
 
     let vector_results: Vec<SearchResult> =
@@ -108,7 +243,7 @@ pub async fn hybrid_search(
                 let vector = pgvector::Vector::from(embedding);
                 sqlx::query_as::<_, SearchResult>(
                     r#"SELECT id as node_id, title, content_type,
-                   substring(content, 1, 200) as snippet,
+                   runestone_snippet(content, 200) as snippet,
                    1 - (embedding <=> $1) as score
                    FROM nodes
                    WHERE vault_id = $2 AND embedding IS NOT NULL
@@ -128,8 +263,8 @@ pub async fn hybrid_search(
     let fts_results: Vec<SearchResult> = if query.include_fts.unwrap_or(true) {
         sqlx::query_as::<_, SearchResult>(
             r#"SELECT id as node_id, title, content_type,
-               substring(content, 1, 200) as snippet,
-               ts_rank_cd(to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content,'')), plainto_tsquery('english', $1)) as score
+               runestone_snippet(content, 200) as snippet,
+               ts_rank_cd(to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content,'')), plainto_tsquery('english', $1))::float8 as score
                FROM nodes
                WHERE vault_id = $2
                  AND to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content,'')) @@ plainto_tsquery('english', $1)
@@ -164,15 +299,18 @@ pub async fn boolean_search(
     query: SearchQuery,
 ) -> Result<Vec<SearchResult>, String> {
     let ts_query = parse_boolean_query(&query.query);
-    let limit = query.limit.unwrap_or(20);
+    if ts_query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = query.limit.unwrap_or(20).clamp(0, 200);
 
     let results = sqlx::query_as::<_, SearchResult>(
         r#"SELECT id as node_id, title, content_type,
-           ts_headline('english', content, to_tsquery('english', $1), 'MaxWords=30, MinWords=10') as snippet,
-           ts_rank(to_tsvector('english', coalesce(content, '')), to_tsquery('english', $1)) as score
+           ts_headline('english', runestone_snippet(content, 20000), to_tsquery('english', $1), 'MaxWords=30, MinWords=10') as snippet,
+           ts_rank(to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content, '')), to_tsquery('english', $1))::float8 as score
            FROM nodes
            WHERE vault_id = $2
-             AND to_tsvector('english', coalesce(content, '')) @@ to_tsquery('english', $1)
+             AND to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content, '')) @@ to_tsquery('english', $1)
            ORDER BY score DESC
            LIMIT $3"#,
     )
@@ -208,13 +346,13 @@ pub async fn regex_search(
     }
 
     let case = case_sensitive.unwrap_or(false);
-    let limit = limit.unwrap_or(20).min(100);
+    let limit = limit.unwrap_or(20).clamp(0, 100);
 
     let results = if case {
         sqlx::query_as::<_, SearchResult>(
             r#"SELECT id as node_id, title, content_type,
-               substring(content, 1, 200) as snippet,
-               1.0 as score
+               runestone_snippet(content, 200) as snippet,
+               1.0::float8 as score
                FROM nodes
                WHERE vault_id = $1 AND content ~ $2
                ORDER BY title
@@ -229,8 +367,8 @@ pub async fn regex_search(
     } else {
         sqlx::query_as::<_, SearchResult>(
             r#"SELECT id as node_id, title, content_type,
-               substring(content, 1, 200) as snippet,
-               1.0 as score
+               runestone_snippet(content, 200) as snippet,
+               1.0::float8 as score
                FROM nodes
                WHERE vault_id = $1 AND content ~* $2
                ORDER BY title
@@ -339,7 +477,39 @@ mod tests {
     #[test]
     fn parse_boolean_query_replaces_operators() {
         assert_eq!(parse_boolean_query("foo AND bar"), "foo & bar");
-        assert_eq!(parse_boolean_query("foo OR bar NOT baz"), "foo | bar !baz");
+        assert_eq!(
+            parse_boolean_query("foo OR bar NOT baz"),
+            "foo | bar & !baz"
+        );
+    }
+
+    #[test]
+    fn parse_boolean_query_ands_adjacent_terms() {
+        assert_eq!(parse_boolean_query("foo bar"), "foo & bar");
+        assert_eq!(parse_boolean_query("foo and bar or baz"), "foo & bar | baz");
+        assert_eq!(parse_boolean_query("NOT foo"), "!foo");
+        assert_eq!(parse_boolean_query("foo -bar"), "foo & !bar");
+        assert_eq!(parse_boolean_query("(a b) OR c*"), "( a & b ) | c:*");
+    }
+
+    #[test]
+    fn parse_boolean_query_never_emits_invalid_tsquery_syntax() {
+        assert_eq!(parse_boolean_query(""), "");
+        assert_eq!(parse_boolean_query("   "), "");
+        assert_eq!(parse_boolean_query("AND OR NOT"), "");
+        assert_eq!(parse_boolean_query("foo AND"), "foo");
+        assert_eq!(parse_boolean_query("OR foo"), "foo");
+        assert_eq!(parse_boolean_query("foo & | !"), "foo");
+        assert_eq!(parse_boolean_query("(foo"), "( foo )");
+        assert_eq!(parse_boolean_query("foo)"), "foo");
+        assert_eq!(parse_boolean_query("()"), "");
+        assert_eq!(parse_boolean_query("a ( ) b"), "a & b");
+        assert_eq!(
+            parse_boolean_query("'; drop table nodes;--"),
+            "drop & table & nodes"
+        );
+        assert_eq!(parse_boolean_query("a:b <-> c"), "a & b & c");
+        assert_eq!(parse_boolean_query("café naïve"), "café & naïve");
     }
 
     fn make_result(id: uuid::Uuid, title: &str, score: f64) -> SearchResult {
