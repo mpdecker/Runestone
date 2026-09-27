@@ -77,7 +77,7 @@ export function NodeList() {
             onClick={() => setNodePage(Math.max(0, nodePage - 1))}
             disabled={nodePage === 0}
           >
-            \u2190
+            {'\u2190'}
           </Button>
           <span className="text-[10px] text-muted-foreground">
             {nodePage + 1}/{totalPages}
@@ -89,7 +89,7 @@ export function NodeList() {
             onClick={() => setNodePage(Math.min(totalPages - 1, nodePage + 1))}
             disabled={nodePage >= totalPages - 1}
           >
-            \u2192
+            {'\u2192'}
           </Button>
         </div>
       )}

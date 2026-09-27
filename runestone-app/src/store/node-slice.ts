@@ -23,6 +23,13 @@ export async function setupVaultFileWatcher(reload: () => Promise<void>): Promis
   }
 }
 
+async function flushPendingSave(get: () => AppStore): Promise<void> {
+  const state = get()
+  if (state.isEditorDirty && state.currentNode) {
+    await state.saveNode()
+  }
+}
+
 export interface NodeSlice {
   nodes: NodeListItem[]
   selectedNodeId: string | null
@@ -99,6 +106,9 @@ export const createNodeSlice: StateCreator<AppStore, [], [], NodeSlice> = (set, 
   },
 
   selectNode: async (nodeId: string) => {
+    // Unsaved edits belong to the note being left. Without this flush they were discarded: the
+    // pending autosave timer would later fire against the *newly selected* note.
+    await flushPendingSave(get)
     set({
       nodeLoading: true,
       nodeError: null,
@@ -131,6 +141,7 @@ export const createNodeSlice: StateCreator<AppStore, [], [], NodeSlice> = (set, 
   createNode: async (title: string) => {
     const { selectedVaultId } = get()
     if (!selectedVaultId) return
+    await flushPendingSave(get)
     set({ nodeLoading: true, nodeError: null })
     try {
       const node = await api.createNode({
@@ -174,14 +185,25 @@ export const createNodeSlice: StateCreator<AppStore, [], [], NodeSlice> = (set, 
         id: node.id,
         content: node.content,
       })
+      // Keystrokes may have landed while the request was in flight. Only adopt the server copy
+      // wholesale if the editor content is still what we sent; otherwise keep the newer text
+      // and stay dirty so the next autosave persists it. If the user switched notes meanwhile,
+      // don't overwrite the newly selected one.
+      const latest = secondary ? get().secondaryNode : get().currentNode
+      const sameNode = latest?.id === updated.id
+      const typedSince = sameNode && latest.content !== node.content
       if (secondary) {
         set({
-          secondaryNode: updated,
+          ...(sameNode ? { secondaryNode: typedSince ? { ...updated, content: latest.content } : updated } : {}),
           isSecondarySaving: false,
-          isSecondaryEditorDirty: false,
+          isSecondaryEditorDirty: typedSince,
         })
       } else {
-        set({ currentNode: updated, isSaving: false, isEditorDirty: false })
+        set({
+          ...(sameNode ? { currentNode: typedSince ? { ...updated, content: latest.content } : updated } : {}),
+          isSaving: false,
+          isEditorDirty: typedSince,
+        })
       }
     } catch (e) {
       if (secondary) {
