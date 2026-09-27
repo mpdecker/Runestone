@@ -27,7 +27,16 @@ pub fn verify_bearer_token(headers: &axum::http::HeaderMap, expected: &str) -> b
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let token = auth.strip_prefix("Bearer ").unwrap_or("");
-    token == expected
+    constant_time_eq(token.as_bytes(), expected.as_bytes())
+}
+
+/// Compare without leaking, through timing, how many leading bytes of the token were right.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    let mut diff = (a.len() ^ b.len()) as u8;
+    for i in 0..a.len().max(b.len()) {
+        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
+    }
+    diff == 0
 }
 
 pub fn build_router(state: Arc<ServerState>) -> Router {
@@ -87,6 +96,15 @@ mod tests {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(AUTHORIZATION, "Bearer secret-token".parse().unwrap());
         assert!(verify_bearer_token(&headers, "secret-token"));
+    }
+
+    #[test]
+    fn constant_time_eq_matches_only_equal_inputs() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+        assert!(!constant_time_eq(b"", b"a"));
+        assert!(constant_time_eq(b"", b""));
     }
 
     #[test]

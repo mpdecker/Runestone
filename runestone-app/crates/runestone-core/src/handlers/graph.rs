@@ -308,6 +308,22 @@ pub async fn resolve_pending_links(
             .await
             .map_err(|e| format!("Neo4j wiki link failed: {}", e))?;
     }
+
+    // A link like [[C# notes]] written before that note existed was stored as "C" (text before
+    // the '#'). Re-derive the links of such sources now that the full title resolves.
+    let stale_sources = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT DISTINCT wl.source_node_id FROM wiki_links wl JOIN nodes src ON src.id = wl.source_node_id WHERE src.vault_id = $1 AND wl.resolved_node_id IS NULL AND (starts_with(lower($2), lower(wl.target_title) || '#') OR starts_with(lower($2), lower(wl.target_title) || '^'))",
+    )
+    .bind(vault_id)
+    .bind(title)
+    .fetch_all(&ctx.pg)
+    .await
+    .map_err(|e| format!("Failed to find dependent links: {}", e))?;
+    for (source_id,) in stale_sources {
+        if source_id != node_id {
+            parse_wiki_links(ctx, source_id).await?;
+        }
+    }
     Ok(())
 }
 
