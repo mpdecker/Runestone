@@ -4,7 +4,9 @@ use crate::services::graph_sync;
 use uuid::Uuid;
 
 pub async fn create_daily_note(ctx: &BackendContext, vault_id: Uuid) -> Result<Node, String> {
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    // The user's calendar day (server/desktop local time), not UTC: in the evening west of
+    // Greenwich UTC is already tomorrow.
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     let existing = sqlx::query_as::<_, Node>(
         "SELECT id, vault_id, title, content, content_type, file_path, metadata, word_count, created_at, updated_at FROM nodes WHERE vault_id = $1 AND title = $2 LIMIT 1",
@@ -32,7 +34,7 @@ pub async fn create_daily_note(ctx: &BackendContext, vault_id: Uuid) -> Result<N
     .bind(vault_id)
     .bind(&today)
     .bind(&content)
-    .bind(content.split_whitespace().count() as i32)
+    .bind(crate::util::word_count(&content))
     .fetch_one(&ctx.pg)
     .await
     .map_err(|e| format!("Failed to create daily note: {}", e))?;
@@ -47,6 +49,8 @@ pub async fn create_daily_note(ctx: &BackendContext, vault_id: Uuid) -> Result<N
     )
     .await
     .map_err(|e| e.to_string())?;
+
+    crate::handlers::node::sync_links_best_effort(ctx, &row, true).await;
 
     Ok(row)
 }
@@ -79,7 +83,7 @@ pub async fn create_node_from_template(
     .await
     .map_err(|e| format!("Template not found: {}", e))?;
 
-    let now = chrono::Utc::now();
+    let now = chrono::Local::now();
     let new_title = title.unwrap_or_else(|| {
         template
             .title
@@ -108,7 +112,7 @@ pub async fn create_node_from_template(
     .bind(template.vault_id)
     .bind(&new_title)
     .bind(&new_content)
-    .bind(new_content.split_whitespace().count() as i32)
+    .bind(crate::util::word_count(&new_content))
     .fetch_one(&ctx.pg)
     .await
     .map_err(|e| format!("Failed to create node from template: {}", e))?;
@@ -123,6 +127,8 @@ pub async fn create_node_from_template(
     )
     .await
     .map_err(|e| e.to_string())?;
+
+    crate::handlers::node::sync_links_best_effort(ctx, &row, true).await;
 
     Ok(row)
 }

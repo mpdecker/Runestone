@@ -86,10 +86,54 @@ pub async fn create_wiki_link(
     graph
         .run(
             neo4rs::query(
-                "MATCH (a:Node {pg_id: $a_id}), (b:Node {pg_id: $b_id}) CREATE (a)-[:LINKS_TO {context: 'wiki-link'}]->(b)",
+                "MATCH (a:Node {pg_id: $a_id}), (b:Node {pg_id: $b_id}) MERGE (a)-[:LINKS_TO {context: 'wiki-link'}]->(b)",
             )
             .param("a_id", source_id.to_string())
             .param("b_id", target_id.to_string()),
+        )
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_wiki_link(
+    graph: &Arc<neo4rs::Graph>,
+    source_id: Uuid,
+    target_id: Uuid,
+) -> AppResult<()> {
+    graph
+        .run(
+            neo4rs::query(
+                "MATCH (a:Node {pg_id: $a_id})-[r:LINKS_TO]->(b:Node {pg_id: $b_id}) DELETE r",
+            )
+            .param("a_id", source_id.to_string())
+            .param("b_id", target_id.to_string()),
+        )
+        .await?;
+    Ok(())
+}
+
+/// Carry the wiki-link edges of `source` over to `target` (used when merging two notes).
+pub async fn move_links(
+    graph: &Arc<neo4rs::Graph>,
+    source_id: Uuid,
+    target_id: Uuid,
+) -> AppResult<()> {
+    graph
+        .run(
+            neo4rs::query(
+                "MATCH (a:Node)-[:LINKS_TO]->(:Node {pg_id: $s}), (t:Node {pg_id: $t}) WHERE a.pg_id <> $t MERGE (a)-[:LINKS_TO {context: 'wiki-link'}]->(t)",
+            )
+            .param("s", source_id.to_string())
+            .param("t", target_id.to_string()),
+        )
+        .await?;
+    graph
+        .run(
+            neo4rs::query(
+                "MATCH (:Node {pg_id: $s})-[:LINKS_TO]->(x:Node), (t:Node {pg_id: $t}) WHERE x.pg_id <> $t MERGE (t)-[:LINKS_TO {context: 'wiki-link'}]->(x)",
+            )
+            .param("s", source_id.to_string())
+            .param("t", target_id.to_string()),
         )
         .await?;
     Ok(())
