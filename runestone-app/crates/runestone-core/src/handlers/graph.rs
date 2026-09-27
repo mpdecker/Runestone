@@ -108,6 +108,62 @@ pub async fn get_local_graph(
     })
 }
 
+/// One `[[...]]` occurrence, with the titles it may refer to in resolution order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedLink {
+    /// `(title, context)` candidates. The first is the whole link text (minus any `|alias`) so
+    /// notes whose titles contain `#` or `^` still resolve; the last is the text before the
+    /// first `#`/`^` with the heading/block reference as context.
+    pub candidates: Vec<(String, Option<String>)>,
+}
+
+/// Extract `[[wiki links]]` from note content. Content is editor HTML, so link text arrives
+/// HTML-escaped (`[[A &amp; B]]`); decode before matching so it can resolve to `A & B`.
+pub fn extract_wiki_links(content: &str) -> Vec<ParsedLink> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"\[\[([^\]]+)\]\]").unwrap());
+
+    let mut links = Vec::new();
+    for cap in re.captures_iter(content) {
+        let decoded = crate::util::decode_html_entities(&cap[1]);
+        // `[[Title|alias]]`: the alias is display text only.
+        let target = decoded.split('|').next().unwrap_or("").trim().to_string();
+        if target.is_empty() {
+            continue;
+        }
+        let mut candidates = vec![(target.clone(), None)];
+        if let Some(pos) = target.find(['#', '^']) {
+            let (title_part, ref_part) = target.split_at(pos);
+            let title_part = title_part.trim();
+            if !title_part.is_empty() {
+                candidates.push((title_part.to_string(), Some(ref_part.to_string())));
+            }
+        }
+        links.push(ParsedLink { candidates });
+    }
+    links
+}
+
+async fn resolve_title(
+    pool: &sqlx::PgPool,
+    vault_id: Uuid,
+    title: &str,
+) -> Result<Option<Uuid>, String> {
+    let row = sqlx::query_as::<_, NodeIdRow>(
+        "SELECT id FROM nodes WHERE vault_id = $1 AND (title = $2 OR lower(title) = lower($2) OR metadata->'aliases' ? $2) ORDER BY (title = $2) DESC, created_at LIMIT 1",
+    )
+    .bind(vault_id)
+    .bind(title)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Query error: {}", e))?;
+    Ok(row.map(|r| r.id))
+}
+
+/// Re-derive a note's wiki links from its content so PostgreSQL (`wiki_links`) and Neo4j
+/// (`LINKS_TO`) both match what the note says *now*: new links are added, links that were
+/// deleted from the text are removed, and links whose target did not exist yet are resolved.
+/// Returns the rows that were inserted or changed.
 pub async fn parse_wiki_links(
     ctx: &BackendContext,
     node_id: Uuid,
@@ -120,68 +176,155 @@ pub async fn parse_wiki_links(
     .await
     .map_err(|e| format!("Node not found: {}", e))?;
 
-    let re = regex::Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
-    let mut created_links: Vec<WikiLinkRow> = Vec::new();
-
-    for cap in re.captures_iter(&node.content) {
-        let raw_target = cap[1].to_string();
-        let (target_title, block_ref) = if let Some(pos) = raw_target.find('#') {
-            let (title_part, ref_part) = raw_target.split_at(pos);
-            (title_part.to_string(), Some(ref_part.to_string()))
-        } else if let Some(pos) = raw_target.find('^') {
-            let (title_part, ref_part) = raw_target.split_at(pos);
-            (title_part.to_string(), Some(ref_part.to_string()))
-        } else {
-            (raw_target.clone(), None)
-        };
-
-        let existing = sqlx::query_as::<_, WikiLinkRow>(
-            "SELECT id, source_node_id, target_title, resolved_node_id, context, created_at FROM wiki_links WHERE source_node_id = $1 AND target_title = $2",
-        )
-        .bind(node_id)
-        .bind(&target_title)
-        .fetch_optional(&ctx.pg)
-        .await
-        .map_err(|e| format!("Query error: {}", e))?;
-
-        if existing.is_some() {
-            continue;
+    // Desired state: (stored title, context, resolved target), first occurrence wins.
+    let mut desired: Vec<(String, Option<String>, Option<Uuid>)> = Vec::new();
+    for link in extract_wiki_links(&node.content) {
+        let mut chosen = None;
+        for (title, context) in &link.candidates {
+            if let Some(id) = resolve_title(&ctx.pg, node.vault_id, title).await? {
+                chosen = Some((title.clone(), context.clone(), Some(id)));
+                break;
+            }
         }
-
-        let resolved = sqlx::query_as::<_, NodeIdRow>(
-            "SELECT id FROM nodes WHERE vault_id = $1 AND title = $2 LIMIT 1",
-        )
-        .bind(node.vault_id)
-        .bind(&target_title)
-        .fetch_optional(&ctx.pg)
-        .await
-        .map_err(|e| format!("Query error: {}", e))?;
-
-        let id = Uuid::new_v4();
-        let resolved_id = resolved.map(|r| r.id);
-
-        let link = sqlx::query_as::<_, WikiLinkRow>(
-            "INSERT INTO wiki_links (id, source_node_id, target_title, resolved_node_id, context) VALUES ($1, $2, $3, $4, $5) RETURNING id, source_node_id, target_title, resolved_node_id, context, created_at",
-        )
-        .bind(id)
-        .bind(node_id)
-        .bind(&target_title)
-        .bind(resolved_id)
-        .bind(&block_ref)
-        .fetch_one(&ctx.pg)
-        .await
-        .map_err(|e| format!("Failed to insert wiki link: {}", e))?;
-
-        if let Some(rid) = resolved_id {
-            graph_sync::create_wiki_link(&ctx.neo4j, node_id, rid)
-                .await
-                .map_err(|e| format!("Neo4j wiki link failed: {}", e))?;
+        let (title, context, resolved) = chosen.unwrap_or_else(|| {
+            let (t, c) = link.candidates.last().cloned().unwrap();
+            (t, c, None)
+        });
+        if !desired.iter().any(|(t, _, _)| *t == title) {
+            desired.push((title, context, resolved));
         }
-
-        created_links.push(link);
     }
 
-    Ok(created_links)
+    let existing = sqlx::query_as::<_, WikiLinkRow>(
+        "SELECT id, source_node_id, target_title, resolved_node_id, context, created_at FROM wiki_links WHERE source_node_id = $1",
+    )
+    .bind(node_id)
+    .fetch_all(&ctx.pg)
+    .await
+    .map_err(|e| format!("Query error: {}", e))?;
+
+    let mut changed: Vec<WikiLinkRow> = Vec::new();
+    let mut edges_to_keep: Vec<Uuid> = Vec::new();
+
+    for (title, context, resolved) in &desired {
+        match existing.iter().find(|r| r.target_title == *title) {
+            Some(row) => {
+                // Keep an existing resolution when the text no longer resolves (e.g. the target
+                // note was renamed); otherwise follow the current resolution.
+                let target = resolved.or(row.resolved_node_id);
+                if let Some(t) = target {
+                    edges_to_keep.push(t);
+                }
+                if target != row.resolved_node_id {
+                    let updated = sqlx::query_as::<_, WikiLinkRow>(
+                        "UPDATE wiki_links SET resolved_node_id = $2, context = $3 WHERE id = $1 RETURNING id, source_node_id, target_title, resolved_node_id, context, created_at",
+                    )
+                    .bind(row.id)
+                    .bind(target)
+                    .bind(context)
+                    .fetch_one(&ctx.pg)
+                    .await
+                    .map_err(|e| format!("Failed to update wiki link: {}", e))?;
+                    changed.push(updated);
+                }
+            }
+            None => {
+                let link = sqlx::query_as::<_, WikiLinkRow>(
+                    "INSERT INTO wiki_links (id, source_node_id, target_title, resolved_node_id, context) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (source_node_id, target_title) DO NOTHING RETURNING id, source_node_id, target_title, resolved_node_id, context, created_at",
+                )
+                .bind(Uuid::new_v4())
+                .bind(node_id)
+                .bind(title)
+                .bind(resolved)
+                .bind(context)
+                .fetch_optional(&ctx.pg)
+                .await
+                .map_err(|e| format!("Failed to insert wiki link: {}", e))?;
+                if let Some(link) = link {
+                    if let Some(t) = resolved {
+                        edges_to_keep.push(*t);
+                    }
+                    changed.push(link);
+                }
+            }
+        }
+    }
+
+    // Links that are no longer in the text.
+    for row in existing
+        .iter()
+        .filter(|r| !desired.iter().any(|(t, _, _)| *t == r.target_title))
+    {
+        sqlx::query("DELETE FROM wiki_links WHERE id = $1")
+            .bind(row.id)
+            .execute(&ctx.pg)
+            .await
+            .map_err(|e| format!("Failed to remove stale wiki link: {}", e))?;
+    }
+
+    // Neo4j: drop edges that no remaining link justifies, (re)create the ones that are.
+    let stale_targets: Vec<Uuid> = existing
+        .iter()
+        .filter_map(|r| r.resolved_node_id)
+        .filter(|t| !edges_to_keep.contains(t))
+        .collect();
+    for target in stale_targets {
+        graph_sync::delete_wiki_link(&ctx.neo4j, node_id, target)
+            .await
+            .map_err(|e| format!("Neo4j wiki link removal failed: {}", e))?;
+    }
+    for target in edges_to_keep {
+        graph_sync::create_wiki_link(&ctx.neo4j, node_id, target)
+            .await
+            .map_err(|e| format!("Neo4j wiki link failed: {}", e))?;
+    }
+
+    Ok(changed)
+}
+
+/// After a note is created or renamed, links elsewhere in the vault that were waiting for that
+/// title ("[[Later]]" written before "Later" existed) now resolve to it.
+pub async fn resolve_pending_links(
+    ctx: &BackendContext,
+    node_id: Uuid,
+    vault_id: Uuid,
+    title: &str,
+) -> Result<(), String> {
+    if title.trim().is_empty() {
+        return Ok(());
+    }
+    let sources = sqlx::query_as::<_, (Uuid,)>(
+        "UPDATE wiki_links wl SET resolved_node_id = $1 FROM nodes src WHERE wl.source_node_id = src.id AND src.vault_id = $2 AND wl.resolved_node_id IS NULL AND lower(wl.target_title) = lower($3) RETURNING wl.source_node_id",
+    )
+    .bind(node_id)
+    .bind(vault_id)
+    .bind(title)
+    .fetch_all(&ctx.pg)
+    .await
+    .map_err(|e| format!("Failed to resolve pending links: {}", e))?;
+
+    for (source_id,) in sources {
+        graph_sync::create_wiki_link(&ctx.neo4j, source_id, node_id)
+            .await
+            .map_err(|e| format!("Neo4j wiki link failed: {}", e))?;
+    }
+
+    // A link like [[C# notes]] written before that note existed was stored as "C" (text before
+    // the '#'). Re-derive the links of such sources now that the full title resolves.
+    let stale_sources = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT DISTINCT wl.source_node_id FROM wiki_links wl JOIN nodes src ON src.id = wl.source_node_id WHERE src.vault_id = $1 AND wl.resolved_node_id IS NULL AND (starts_with(lower($2), lower(wl.target_title) || '#') OR starts_with(lower($2), lower(wl.target_title) || '^'))",
+    )
+    .bind(vault_id)
+    .bind(title)
+    .fetch_all(&ctx.pg)
+    .await
+    .map_err(|e| format!("Failed to find dependent links: {}", e))?;
+    for (source_id,) in stale_sources {
+        if source_id != node_id {
+            parse_wiki_links(ctx, source_id).await?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn get_backlinks(ctx: &BackendContext, node_id: Uuid) -> Result<Vec<Backlink>, String> {
@@ -206,7 +349,8 @@ pub async fn get_backlinks(ctx: &BackendContext, node_id: Uuid) -> Result<Vec<Ba
         .map_err(|e| format!("Query error: {}", e))?;
 
         if let Some(s) = source {
-            let ctx_snippet = s.content.chars().take(100).collect::<String>();
+            let ctx_snippet =
+                crate::util::truncate_chars(&crate::util::plain_text(&s.content), 100).to_string();
             backlinks.push(Backlink {
                 node_id: s.id,
                 title: s.title,
@@ -240,7 +384,9 @@ pub async fn get_backlinks(ctx: &BackendContext, node_id: Uuid) -> Result<Vec<Ba
                 .map_err(|e| format!("Query error: {}", e))?;
 
                 if let Some(s) = source {
-                    let ctx_snippet = s.content.chars().take(100).collect::<String>();
+                    let ctx_snippet =
+                        crate::util::truncate_chars(&crate::util::plain_text(&s.content), 100)
+                            .to_string();
                     backlinks.push(Backlink {
                         node_id: s.id,
                         title: s.title,
@@ -280,7 +426,9 @@ pub async fn get_outgoing_links(
             .map_err(|e| format!("Query error: {}", e))?;
 
             if let Some(t) = target {
-                let ctx_snippet = t.content.chars().take(100).collect::<String>();
+                let ctx_snippet =
+                    crate::util::truncate_chars(&crate::util::plain_text(&t.content), 100)
+                        .to_string();
                 outgoing.push(Backlink {
                     node_id: t.id,
                     title: t.title,
@@ -322,7 +470,9 @@ pub async fn get_outgoing_links(
                 .map_err(|e| format!("Query error: {}", e))?;
 
                 if let Some(t) = target {
-                    let ctx_snippet = t.content.chars().take(100).collect::<String>();
+                    let ctx_snippet =
+                        crate::util::truncate_chars(&crate::util::plain_text(&t.content), 100)
+                            .to_string();
                     outgoing.push(Backlink {
                         node_id: t.id,
                         title: t.title,
@@ -335,4 +485,55 @@ pub async fn get_outgoing_links(
     }
 
     Ok(outgoing)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn titles(link: &ParsedLink) -> Vec<&str> {
+        link.candidates.iter().map(|(t, _)| t.as_str()).collect()
+    }
+
+    #[test]
+    fn extracts_plain_and_html_wrapped_links() {
+        let links = extract_wiki_links(
+            r#"<p>see <span data-type="wiki-link" data-title="Beta">[[Beta]]</span> and [[Gamma]]</p>"#,
+        );
+        assert_eq!(links.len(), 2);
+        assert_eq!(titles(&links[0]), vec!["Beta"]);
+        assert_eq!(titles(&links[1]), vec!["Gamma"]);
+    }
+
+    #[test]
+    fn decodes_html_entities_in_link_text() {
+        let links = extract_wiki_links("<p>[[A &amp; B]] [[Tom &quot;T&quot; &lt;x&gt;]]</p>");
+        assert_eq!(titles(&links[0]), vec!["A & B"]);
+        assert_eq!(titles(&links[1]), vec!["Tom \"T\" <x>"]);
+    }
+
+    #[test]
+    fn strips_alias_and_splits_heading_or_block_refs() {
+        let links =
+            extract_wiki_links("[[Beta|shown text]] [[Beta#Heading]] [[Beta^blk]] [[C# notes]]");
+        assert_eq!(links[0].candidates, vec![("Beta".to_string(), None)]);
+        assert_eq!(
+            links[1].candidates,
+            vec![
+                ("Beta#Heading".to_string(), None),
+                ("Beta".to_string(), Some("#Heading".to_string()))
+            ]
+        );
+        assert_eq!(
+            links[2].candidates.last().unwrap().1.as_deref(),
+            Some("^blk")
+        );
+        // a title that itself contains '#': the whole text is tried first
+        assert_eq!(titles(&links[3]), vec!["C# notes", "C"]);
+    }
+
+    #[test]
+    fn ignores_empty_links() {
+        assert!(extract_wiki_links("[[|alias]] [[ ]]").is_empty());
+    }
 }

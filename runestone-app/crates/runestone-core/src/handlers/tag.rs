@@ -4,6 +4,12 @@ use crate::models::tag::{AddTagsRequest, RemoveTagRequest, TagInfo, TagsResponse
 use crate::services::graph_sync;
 use uuid::Uuid;
 
+/// Tags are case-insensitive and may be typed as `#tag`; the stored form is lowercase, trimmed,
+/// without the leading `#`.
+pub fn normalize_tag(tag: &str) -> String {
+    tag.trim().trim_start_matches('#').trim().to_lowercase()
+}
+
 pub async fn get_node_tags(ctx: &BackendContext, node_id: Uuid) -> Result<TagsResponse, String> {
     let row = sqlx::query_as::<_, (Option<serde_json::Value>,)>(
         "SELECT metadata FROM nodes WHERE id = $1",
@@ -43,7 +49,7 @@ pub async fn add_tags_to_node(
 
     let mut new_tags = existing_tags.clone();
     for tag in &request.tags {
-        let normalized = tag.trim().to_lowercase();
+        let normalized = normalize_tag(tag);
         if !normalized.is_empty() && !new_tags.contains(&normalized) {
             new_tags.push(normalized);
         }
@@ -92,9 +98,11 @@ pub async fn remove_tag_from_node(
         .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
         .unwrap_or_default();
 
+    // Tags are stored normalized (see `normalize_tag`), so match the same way.
+    let removed = normalize_tag(&request.tag);
     let new_tags: Vec<String> = existing_tags
         .iter()
-        .filter(|t| **t != request.tag)
+        .filter(|t| **t != removed)
         .cloned()
         .collect();
 
@@ -108,7 +116,7 @@ pub async fn remove_tag_from_node(
         .await
         .map_err(|e| format!("Failed to update tags: {}", e))?;
 
-    graph_sync::remove_tag(&ctx.neo4j, request.node_id, &request.tag)
+    graph_sync::remove_tag(&ctx.neo4j, request.node_id, &removed)
         .await
         .map_err(|e| format!("Neo4j tag removal failed: {}", e))?;
 
@@ -121,7 +129,9 @@ pub async fn remove_tag_from_node(
 pub async fn list_tags(ctx: &BackendContext, vault_id: Uuid) -> Result<Vec<TagInfo>, String> {
     let rows = sqlx::query_as::<_, (String, i64)>(
         r#"SELECT tag, COUNT(*) as node_count
-           FROM nodes, jsonb_array_elements_text(COALESCE(metadata->'tags', '[]'::jsonb)) AS tag
+           FROM nodes, jsonb_array_elements_text(
+                    CASE WHEN jsonb_typeof(metadata->'tags') = 'array' THEN metadata->'tags' ELSE '[]'::jsonb END
+                ) AS tag
            WHERE vault_id = $1
            GROUP BY tag
            ORDER BY node_count DESC"#,
@@ -148,11 +158,11 @@ pub async fn get_nodes_by_tag(
     let rows = sqlx::query_as::<_, NodeListItem>(
         r#"SELECT id, title, content_type, file_path, updated_at
            FROM nodes
-           WHERE vault_id = $1 AND metadata->'tags' ? $2
+           WHERE vault_id = $1 AND jsonb_typeof(metadata->'tags') = 'array' AND metadata->'tags' ? $2
            ORDER BY updated_at DESC"#,
     )
     .bind(vault_id)
-    .bind(&tag)
+    .bind(normalize_tag(&tag))
     .fetch_all(&ctx.pg)
     .await
     .map_err(|e| format!("Failed to get nodes by tag: {}", e))?;
@@ -166,4 +176,16 @@ pub async fn accept_tag_suggestions(
     tags: Vec<String>,
 ) -> Result<TagsResponse, String> {
     add_tags_to_node(ctx, AddTagsRequest { node_id, tags }).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_tag_lowercases_trims_and_drops_hash() {
+        assert_eq!(normalize_tag("  #Rust "), "rust");
+        assert_eq!(normalize_tag("Graph Theory"), "graph theory");
+        assert_eq!(normalize_tag("#"), "");
+    }
 }

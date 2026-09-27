@@ -2,17 +2,18 @@ use crate::context::BackendContext;
 use crate::error::{AppError, AppResult};
 use crate::models::graph::{CypherResultRow, GraphQueryRequest, GraphQueryResponse};
 
-const DESTRUCTIVE_CYPHER: &[&str] = &[
-    "DELETE", "DETACH DELETE", "REMOVE", "SET", "CREATE", "MERGE", "DROP",
-    "CALL", "LOAD CSV", "PERIODIC COMMIT", "USING PERIODIC COMMIT",
-];
 const MAX_CYPHER_ROWS: usize = 200;
 const MAX_RESULT_CHARS: usize = 4000;
 
-pub async fn run_cypher(
-    ctx: &BackendContext,
-    cypher: String,
-) -> AppResult<Vec<CypherResultRow>> {
+/// Clauses/keywords that write, or that reach outside the graph. Matched as whole words on the
+/// query with string literals and comments removed, so `WHERE n.title = 'Set theory'`,
+/// `created_at` or `Dataset` are not mistaken for `SET`/`CREATE`.
+const DESTRUCTIVE_KEYWORDS: &[&str] = &[
+    "DELETE", "DETACH", "REMOVE", "SET", "CREATE", "MERGE", "DROP", "CALL", "FOREACH", "LOAD",
+    "PERIODIC", "COMMIT", "APOC", "DBMS",
+];
+
+pub async fn run_cypher(ctx: &BackendContext, cypher: String) -> AppResult<Vec<CypherResultRow>> {
     let sanitized = sanitize_cypher(&cypher)?;
 
     log::debug!("Executing Cypher query: {}", sanitized);
@@ -24,20 +25,26 @@ pub async fn run_cypher(
         .map_err(|e| AppError::Neo4j(format!("Cypher execution failed: {}", e)))?;
 
     let mut rows: Vec<CypherResultRow> = Vec::new();
-    let expected_keys = [
-        "pg_id", "title", "content_type", "name", "type(r)", "count",
-        "n.pg_id", "m.pg_id", "m.title", "target.pg_id", "label",
-    ];
-
-    while let Ok(Some(row)) = stream.next().await {
+    loop {
+        // Surface stream errors (e.g. a rejected write) instead of returning a silent "no rows".
+        let row = match stream.next().await {
+            Ok(Some(row)) => row,
+            Ok(None) => break,
+            Err(e) => return Err(AppError::Neo4j(format!("Cypher execution failed: {}", e))),
+        };
         if rows.len() >= MAX_CYPHER_ROWS {
             break;
         }
         let mut pairs: Vec<(String, String)> = Vec::new();
-        for key in &expected_keys {
-            if let Ok(val) = row.get::<String>(key) {
-                if !val.is_empty() {
-                    pairs.push((key.to_string(), val));
+        if let Ok(map) = row.to::<serde_json::Map<String, serde_json::Value>>() {
+            for (key, val) in map {
+                let text = match val {
+                    serde_json::Value::Null => continue,
+                    serde_json::Value::String(s) => s,
+                    other => other.to_string(),
+                };
+                if !text.is_empty() {
+                    pairs.push((key, text));
                 }
             }
         }
@@ -50,26 +57,80 @@ pub async fn run_cypher(
     Ok(rows)
 }
 
-fn sanitize_cypher(cypher: &str) -> AppResult<String> {
-    let upper = cypher.to_uppercase();
+/// Returns `(executable, inspectable)`: the query without comments, and the same text with
+/// string literals blanked out (used only for keyword checks).
+fn strip_comments_and_strings(cypher: &str) -> (String, String) {
+    let chars: Vec<char> = cypher.chars().collect();
+    let mut exec = String::with_capacity(cypher.len());
+    let mut check = String::with_capacity(cypher.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        if c == '/' && next == Some('/') {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            exec.push('\n');
+            check.push('\n');
+        } else if c == '/' && next == Some('*') {
+            i += 2;
+            while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
+                i += 1;
+            }
+            i += 2;
+            exec.push(' ');
+            check.push(' ');
+        } else if c == '\'' || c == '"' {
+            let quote = c;
+            exec.push(c);
+            check.push(' ');
+            i += 1;
+            while i < chars.len() {
+                let d = chars[i];
+                exec.push(d);
+                if d == '\\' && i + 1 < chars.len() {
+                    exec.push(chars[i + 1]);
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+                if d == quote {
+                    break;
+                }
+            }
+            check.push(' ');
+        } else {
+            exec.push(c);
+            check.push(c);
+            i += 1;
+        }
+    }
+    (exec, check)
+}
 
-    for keyword in DESTRUCTIVE_CYPHER {
-        if upper.contains(keyword) {
+fn sanitize_cypher(cypher: &str) -> AppResult<String> {
+    let (exec, check) = strip_comments_and_strings(cypher);
+    let upper = check.to_uppercase();
+
+    for word in upper.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
+        if DESTRUCTIVE_KEYWORDS.contains(&word) {
             return Err(AppError::Validation(format!(
                 "Cypher query contains disallowed keyword: '{}'. Only read-only queries are permitted.",
-                keyword
+                word
             )));
         }
     }
 
-    let trimmed = cypher.trim();
-    let sanitized = if !upper.contains("LIMIT") {
-        format!("{} LIMIT {}", trimmed, MAX_CYPHER_ROWS)
-    } else {
+    let trimmed = exec.trim().trim_end_matches(';').trim();
+    let has_limit = upper
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|w| w == "LIMIT");
+    Ok(if has_limit {
         trimmed.to_string()
-    };
-
-    Ok(sanitized)
+    } else {
+        format!("{} LIMIT {}", trimmed, MAX_CYPHER_ROWS)
+    })
 }
 
 pub async fn graph_query(
@@ -118,7 +179,7 @@ content_type values: note, concept, entity, document."#;
         if joined.len() > MAX_RESULT_CHARS {
             format!(
                 "{}...\n(truncated, {} total rows)",
-                &joined[..MAX_RESULT_CHARS],
+                crate::util::truncate_bytes(&joined, MAX_RESULT_CHARS),
                 results.len()
             )
         } else {
@@ -189,6 +250,56 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_does_not_flag_words_that_merely_contain_keywords() {
+        assert!(
+            sanitize_cypher("MATCH (n:Node) WHERE n.title CONTAINS 'Dataset' RETURN n.title")
+                .is_ok()
+        );
+        assert!(
+            sanitize_cypher("MATCH (n:Node) WHERE n.title = 'Set theory' RETURN n.pg_id").is_ok()
+        );
+        assert!(
+            sanitize_cypher("MATCH (n:Node) WHERE n.created_at IS NULL RETURN n.pg_id").is_ok()
+        );
+        assert!(sanitize_cypher("MATCH (n:Node) RETURN n.title ORDER BY n.title SKIP 1").is_ok());
+        assert!(sanitize_cypher("MATCH (n:Node) RETURN n.pg_id AS reset_value").is_ok());
+    }
+
+    #[test]
+    fn sanitize_blocks_write_and_procedure_keywords_in_any_case_or_spacing() {
+        assert!(sanitize_cypher("match (n) detach   delete n").is_err());
+        assert!(sanitize_cypher(
+            "MATCH (n)
+SET n.x = 1"
+        )
+        .is_err());
+        assert!(sanitize_cypher("MATCH (n) FOREACH (x IN [1] | CREATE (:A))").is_err());
+        assert!(sanitize_cypher("CALL db.labels()").is_err());
+        assert!(sanitize_cypher("LOAD CSV FROM 'file:///x' AS r RETURN r").is_err());
+        assert!(sanitize_cypher("RETURN apoc.cypher.runFirstColumnSingle('x', {})").is_err());
+        // a keyword hidden after a comment marker is still checked, a commented-out one is not
+        assert!(sanitize_cypher("MATCH (n) RETURN n // DELETE").is_ok());
+        assert!(sanitize_cypher("MATCH (n) /* x */ DELETE n").is_err());
+    }
+
+    #[test]
+    fn sanitize_limit_handling() {
+        assert_eq!(
+            sanitize_cypher("MATCH (n) RETURN n;").unwrap(),
+            "MATCH (n) RETURN n LIMIT 200"
+        );
+        // a trailing comment must not swallow the appended LIMIT
+        let q = sanitize_cypher("MATCH (n) RETURN n // all").unwrap();
+        assert!(q.ends_with("LIMIT 200") && !q.contains("//"), "{q}");
+        // 'LIMIT' inside a string literal does not count as a limit
+        assert!(
+            sanitize_cypher("MATCH (n) WHERE n.title = 'LIMIT' RETURN n")
+                .unwrap()
+                .ends_with("LIMIT 200")
+        );
+    }
+
+    #[test]
     fn sanitize_preserves_existing_limit() {
         let result = sanitize_cypher("MATCH (n) RETURN n LIMIT 10").unwrap();
         assert_eq!(result, "MATCH (n) RETURN n LIMIT 10");
@@ -196,7 +307,10 @@ mod tests {
 
     #[test]
     fn clean_cypher_strips_markdown() {
-        assert_eq!(clean_cypher("```cypher\nMATCH (n) RETURN n\n```"), "MATCH (n) RETURN n");
+        assert_eq!(
+            clean_cypher("```cypher\nMATCH (n) RETURN n\n```"),
+            "MATCH (n) RETURN n"
+        );
         assert_eq!(clean_cypher("MATCH (n) RETURN n"), "MATCH (n) RETURN n");
         assert_eq!(clean_cypher("  MATCH (n) RETURN n  "), "MATCH (n) RETURN n");
     }

@@ -8,7 +8,7 @@ RUN corepack enable && pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build
 
-FROM rust:1.85-bookworm AS backend-builder
+FROM rust:1.94-bookworm AS backend-builder
 
 WORKDIR /app
 

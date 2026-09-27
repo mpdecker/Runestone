@@ -23,6 +23,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let neo4j_password =
         std::env::var("NEO4J_PASSWORD").unwrap_or_else(|_| "runestone".to_string());
     let api_token = std::env::var("RUNESTONE_API_TOKEN").ok();
+    match api_token.as_deref() {
+        None | Some("") => tracing::warn!(
+            "RUNESTONE_API_TOKEN is not set: every /api/invoke command (including run_cypher and              note deletion) is open to anyone who can reach this port. Set a token before exposing the server."
+        ),
+        Some("runestone-dev-token") | Some("change-me-in-production") => tracing::warn!(
+            "RUNESTONE_API_TOKEN is a well-known placeholder value; set a unique secret before exposing the server."
+        ),
+        _ => {}
+    }
     let port: u16 = std::env::var("RUNESTONE_SERVER_PORT")
         .ok()
         .and_then(|p| p.parse().ok())

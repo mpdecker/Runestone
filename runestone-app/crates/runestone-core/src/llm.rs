@@ -181,7 +181,7 @@ async fn ollama_extract(prompt: &str, config: &LlmConfig) -> Result<ExtractionRe
         format!(
             "Parse Ollama response: {} - body: {}",
             e,
-            &body[..200.min(body.len())]
+            crate::util::truncate_bytes(&body, 200)
         )
     })?;
 
@@ -190,7 +190,7 @@ async fn ollama_extract(prompt: &str, config: &LlmConfig) -> Result<ExtractionRe
             format!(
                 "Parse extraction JSON: {} - content: {}",
                 e,
-                &result.message.content[..200.min(result.message.content.len())]
+                crate::util::truncate_bytes(&result.message.content, 200)
             )
         })?;
 
@@ -228,7 +228,7 @@ async fn openai_extract(prompt: &str, config: &LlmConfig) -> Result<ExtractionRe
         format!(
             "Parse OpenAI response: {} - body: {}",
             e,
-            &body[..200.min(body.len())]
+            crate::util::truncate_bytes(&body, 200)
         )
     })?;
 
@@ -243,7 +243,7 @@ async fn openai_extract(prompt: &str, config: &LlmConfig) -> Result<ExtractionRe
         format!(
             "Parse extraction JSON: {} - content: {}",
             e,
-            &content[..200.min(content.len())]
+            crate::util::truncate_bytes(content, 200)
         )
     })?;
 

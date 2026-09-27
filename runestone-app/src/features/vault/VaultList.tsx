@@ -50,7 +50,7 @@ export function VaultList() {
             onClick={toggleSidebar}
             title="Collapse sidebar (Ctrl+Shift+B)"
           >
-            <span className="text-sm">\u25C0</span>
+            <span className="text-sm">{'\u25C0'}</span>
           </Button>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { Extension } from '@tiptap/core'
 import { Suggestion } from '@tiptap/suggestion'
+import { PluginKey } from '@tiptap/pm/state'
 import type { SuggestionOptions } from '@tiptap/suggestion'
 
 export function WikiLinkSuggestionExtension(options: Omit<SuggestionOptions, 'editor'>) {
@@ -9,6 +10,7 @@ export function WikiLinkSuggestionExtension(options: Omit<SuggestionOptions, 'ed
     addProseMirrorPlugins() {
       return [
         Suggestion({
+          pluginKey: new PluginKey('wikiLinkSuggestion'),
           editor: this.editor,
           ...options,
         }),
