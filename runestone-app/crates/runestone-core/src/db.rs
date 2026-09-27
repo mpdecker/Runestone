@@ -32,7 +32,11 @@ pub async fn run_neo4j_init(graph: &Graph) -> Result<(), neo4rs::Error> {
         "CREATE INDEX node_vault IF NOT EXISTS FOR (n:Node) ON (n.vault_id);",
         "CREATE INDEX node_type IF NOT EXISTS FOR (n:Node) ON (n.content_type);",
         "CREATE INDEX node_title IF NOT EXISTS FOR (n:Node) ON (n.title);",
-        "CREATE INDEX tag_name IF NOT EXISTS FOR (t:Tag) ON (t.name);",
+        // A uniqueness constraint creates its own backing index, and Neo4j 5 refuses to
+        // create the constraint while a plain index on the same (label, property) exists
+        // (`IndexAlreadyExists`). Older versions of this init created that plain index, so
+        // drop it first; on a fresh database this is a no-op.
+        "DROP INDEX tag_name IF EXISTS;",
         "CREATE CONSTRAINT tag_name_unique IF NOT EXISTS FOR (t:Tag) REQUIRE t.name IS UNIQUE;",
     ];
 
