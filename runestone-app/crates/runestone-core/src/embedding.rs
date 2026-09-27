@@ -62,12 +62,37 @@ struct OpenAiEmbedData {
     embedding: Vec<f32>,
 }
 
-pub async fn generate_embedding(text: &str, config: &EmbeddingConfig) -> Result<Vec<f32>, String> {
-    match config.provider.as_str() {
-        "ollama" => ollama_embed(text, config).await,
-        "openai" => openai_embed(text, config).await,
-        _ => Err(format!("Unknown embedding provider: {}", config.provider)),
+/// Width of the `embedding` columns (`vector(1536)` in migrations/001_init.sql).
+pub const EMBEDDING_DIMENSIONS: usize = 1536;
+
+/// Make a provider's vector fit the fixed-width pgvector column. The default local model
+/// (`nomic-embed-text`) returns 768 numbers; storing that into `vector(1536)` fails, which
+/// silently left every note without an embedding. Zero-padding leaves dot products, norms and
+/// therefore cosine distance unchanged, so shorter vectors are padded; a model that returns
+/// *more* than the column can hold is reported clearly instead of failing inside SQL.
+pub fn fit_dimensions(mut embedding: Vec<f32>) -> Result<Vec<f32>, String> {
+    if embedding.is_empty() {
+        return Err("Embedding provider returned an empty vector".to_string());
     }
+    if embedding.len() > EMBEDDING_DIMENSIONS {
+        return Err(format!(
+            "Embedding model returned {} dimensions but the database column holds at most {}. Pick a model with <= {} dimensions (EMBEDDING_MODEL).",
+            embedding.len(),
+            EMBEDDING_DIMENSIONS,
+            EMBEDDING_DIMENSIONS
+        ));
+    }
+    embedding.resize(EMBEDDING_DIMENSIONS, 0.0);
+    Ok(embedding)
+}
+
+pub async fn generate_embedding(text: &str, config: &EmbeddingConfig) -> Result<Vec<f32>, String> {
+    let raw = match config.provider.as_str() {
+        "ollama" => ollama_embed(text, config).await?,
+        "openai" => openai_embed(text, config).await?,
+        _ => return Err(format!("Unknown embedding provider: {}", config.provider)),
+    };
+    fit_dimensions(raw)
 }
 
 async fn ollama_embed(text: &str, config: &EmbeddingConfig) -> Result<Vec<f32>, String> {
@@ -139,6 +164,35 @@ async fn openai_embed(text: &str, config: &EmbeddingConfig) -> Result<Vec<f32>, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fit_dimensions_pads_short_vectors_and_preserves_cosine() {
+        let a = vec![0.5_f32, -1.0, 2.0];
+        let b = vec![1.5_f32, 0.25, -0.5];
+        let cos = |x: &[f32], y: &[f32]| {
+            let dot: f32 = x.iter().zip(y).map(|(p, q)| p * q).sum();
+            let nx: f32 = x.iter().map(|p| p * p).sum::<f32>().sqrt();
+            let ny: f32 = y.iter().map(|p| p * p).sum::<f32>().sqrt();
+            dot / (nx * ny)
+        };
+        let pa = fit_dimensions(a.clone()).unwrap();
+        let pb = fit_dimensions(b.clone()).unwrap();
+        assert_eq!(pa.len(), EMBEDDING_DIMENSIONS);
+        assert!((cos(&a, &b) - cos(&pa, &pb)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fit_dimensions_rejects_empty_and_oversized() {
+        assert!(fit_dimensions(vec![]).is_err());
+        let err = fit_dimensions(vec![0.1; EMBEDDING_DIMENSIONS + 1]).unwrap_err();
+        assert!(err.contains("1537"), "{err}");
+        assert_eq!(
+            fit_dimensions(vec![0.1; EMBEDDING_DIMENSIONS])
+                .unwrap()
+                .len(),
+            EMBEDDING_DIMENSIONS
+        );
+    }
 
     #[test]
     fn test_embedding_config_default_provider() {

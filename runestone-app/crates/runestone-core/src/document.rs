@@ -30,7 +30,7 @@ fn parse_pdf(file_path: &str) -> Result<String, String> {
     let mut text = String::new();
     let pages = doc.get_pages();
 
-    for (page_num, _) in pages.iter() {
+    for page_num in pages.keys() {
         if let Ok(page_text) = doc.extract_text(&[*page_num]) {
             text.push_str(&page_text);
             text.push('\n');

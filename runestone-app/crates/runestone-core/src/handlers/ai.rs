@@ -116,7 +116,7 @@ pub async fn summarize_node(ctx: &BackendContext, node_id: Uuid) -> Result<Strin
     let prompt = format!(
         "Summarize the following note and its connections in 2-3 sentences. Be concise and insightful.\n\nNote title: {}\nContent: {}\n\nConnected nodes:\n{}",
         node.title,
-        &node.content[..1000.min(node.content.len())],
+        crate::util::truncate_bytes(&node.content, 1000),
         neighborhood,
     );
 
@@ -132,7 +132,7 @@ pub async fn chat_with_graph(
 
     let relevant = sqlx::query_as::<_, SearchResult>(
         r#"SELECT id as node_id, title, content_type,
-           substring(content, 1, 300) as snippet,
+           runestone_snippet(content, 300) as snippet,
            1 - (embedding <=> $1) as score
            FROM nodes
            WHERE vault_id = $2 AND embedding IS NOT NULL
@@ -234,7 +234,7 @@ async fn gather_chat_context(
 
     let relevant = sqlx::query_as::<_, SearchResult>(
         r#"SELECT id as node_id, title, content_type,
-           substring(content, 1, 300) as snippet,
+           runestone_snippet(content, 300) as snippet,
            1 - (embedding <=> $1) as score
            FROM nodes
            WHERE vault_id = $2 AND embedding IS NOT NULL
@@ -373,7 +373,7 @@ pub async fn suggest_tags(
     let prompt = format!(
         "Suggest 3-5 relevant tags for this note. Return ONLY valid JSON array of objects with fields: name, confidence (0-1), reason.\n\nTitle: {}\nContent: {}",
         node.title,
-        &node.content[..1500.min(node.content.len())],
+        crate::util::truncate_bytes(&node.content, 1500),
     );
 
     let response_text = match ctx.llm_config.provider.as_str() {
